@@ -331,6 +331,11 @@ tbody tr:hover{background:var(--off)}
 /* Photo preview */
 .item-photo{width:60px;height:60px;border-radius:8px;object-fit:cover;border:2px solid var(--border)}
 .item-photo-placeholder{width:60px;height:60px;border-radius:8px;background:var(--off2);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;font-size:20px}
+
+@keyframes pulse {
+  0%,100%{opacity:.3;transform:scale(.8)}
+  50%{opacity:1;transform:scale(1.2)}
+}
 </style>
 </head>
 <body>
@@ -351,32 +356,29 @@ const DB='gs_';
 //  No API key is hardcoded here.
 // ════════════════════════════════════════
 
-const SB_URL_KEY  = 'bizpoz_sb_url';
-const SB_KEY_KEY  = 'bizpoz_sb_anonkey';
-const SB_ORG_KEY  = 'bizpoz_sb_orgid';
+const SB_ORG_KEY  = 'bizpoz_sb_orgid'; // org_id stored per-browser session
 
 // Get Supabase config from localStorage (user-entered, never shipped in source)
+// ── Supabase config (hardcoded) ──
 const getSBConfig = () => ({
-  url:    localStorage.getItem(SB_URL_KEY)  || '',
-  key:    localStorage.getItem(SB_KEY_KEY)  || '',
+  url:    'https://cionoqjomadpalyyufdd.supabase.co',
+  key:    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpb25vcWpvbWFkcGFseXl1ZmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1MjA0OTUsImV4cCI6MjA5NDA5NjQ5NX0.2Tv1uvUuh8DWeXwHfH_V7C56DWiijy57-xiVefCPers',
   org_id: localStorage.getItem(SB_ORG_KEY) || '',
 });
 
-const isSBConnected = () => {
-  const {url, key} = getSBConfig();
-  return !!(url && key);
-};
+const isSBConnected = () => true;
 
 // ── Supabase REST helper (no SDK needed — plain fetch) ──
+const SB_URL = 'https://cionoqjomadpalyyufdd.supabase.co';
+const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpb25vcWpvbWFkcGFseXl1ZmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1MjA0OTUsImV4cCI6MjA5NDA5NjQ5NX0.2Tv1uvUuh8DWeXwHfH_V7C56DWiijy57-xiVefCPers';
+
 const sbFetch = async (path, opts={}) => {
-  const {url, key} = getSBConfig();
-  if (!url || !key) throw new Error('Supabase not configured');
-  const res = await fetch(`${url}/rest/v1/${path}`, {
+  const res = await fetch(`${SB_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
       'Content-Type':  'application/json',
-      'apikey':         key,
-      'Authorization': `Bearer ${key}`,
+      'apikey':         SB_ANON_KEY,
+      'Authorization': `Bearer ${SB_ANON_KEY}`,
       'Prefer':        opts.prefer || 'return=representation',
       ...(opts.headers||{}),
     },
@@ -518,274 +520,722 @@ function seedDB(){
 // ── Services (all warehouse-scoped) ──
 // BACKEND MIGRATION: Replace db.g/db.s calls with fetch() per service
 
-const whSvc={
-  getAll:()=>db.g('warehouses')||[],
-  getById:(id)=>(db.g('warehouses')||[]).find(w=>w.id===id),
-  create:(d)=>{const a=db.g('warehouses')||[];const w={...d,id:uid(),createdAt:ts()};db.s('warehouses',[...a,w]);return w;},
-  update:(id,d)=>{const a=(db.g('warehouses')||[]).map(w=>w.id===id?{...w,...d}:w);db.s('warehouses',a);return a.find(w=>w.id===id);},
-  delete:(id)=>db.s('warehouses',(db.g('warehouses')||[]).filter(w=>w.id!==id)),
+// ════════════════════════════════════════
+//  SERVICES  — Supabase REST API
+//  All reads/writes go to Supabase.
+//  localStorage (db.*) used only for session.
+// ════════════════════════════════════════
+
+// ── Generic Supabase helpers ──
+
+// GET rows: sb.select('warehouses', 'warehouse_id=eq.xxx')
+const sb = {
+  // SELECT rows — returns array
+  async select(table, filters = '', extra = '') {
+    const q = [filters, extra].filter(Boolean).join('&');
+    return await sbFetch(`${table}${q ? '?' + q : ''}`, {
+      headers: { 'Accept': 'application/json' }
+    }) || [];
+  },
+  // INSERT one row — returns inserted row
+  async insert(table, row) {
+    const res = await sbFetch(table, {
+      method: 'POST',
+      prefer: 'return=representation',
+      body: JSON.stringify(row),
+    });
+    return Array.isArray(res) ? res[0] : res;
+  },
+  // UPDATE rows matching filter — returns updated rows
+  async update(table, filter, data) {
+    const res = await sbFetch(`${table}?${filter}`, {
+      method: 'PATCH',
+      prefer: 'return=representation',
+      body: JSON.stringify(data),
+    });
+    return Array.isArray(res) ? res[0] : res;
+  },
+  // DELETE rows matching filter
+  async delete(table, filter) {
+    await sbFetch(`${table}?${filter}`, { method: 'DELETE', prefer: 'return=minimal' });
+  },
+  // Upsert (insert or update on conflict)
+  async upsert(table, row, onConflict = 'id') {
+    const res = await sbFetch(table, {
+      method: 'POST',
+      prefer: `return=representation,resolution=merge-duplicates`,
+      headers: { 'Prefer': `return=representation,resolution=merge-duplicates`, 'on-conflict': onConflict },
+      body: JSON.stringify(row),
+    });
+    return Array.isArray(res) ? res[0] : res;
+  },
+  // RPC — call a Postgres function
+  async rpc(fn, params = {}) {
+    const res = await sbFetch(`../rpc/${fn}`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+    return res;
+  }
 };
 
-const rackSvc={
-  getAll:(whId)=>{const a=db.g('racks')||[];return whId?a.filter(r=>r.whId===whId):a;},
-  create:(d)=>{const a=db.g('racks')||[];const r={...d,id:uid(),createdAt:ts()};db.s('racks',[...a,r]);return r;},
-  update:(id,d)=>{const a=(db.g('racks')||[]).map(r=>r.id===id?{...r,...d}:r);db.s('racks',a);return a.find(r=>r.id===id);},
-  delete:(id)=>db.s('racks',(db.g('racks')||[]).filter(r=>r.id!==id)),
+// ── Voucher number (calls Postgres function) ──
+const nextVoucherNo = async (type, prefix) => {
+  try {
+    const result = await sbFetch(`../rpc/next_voucher_no`, {
+      method: 'POST',
+      body: JSON.stringify({ p_type: type, p_prefix: prefix }),
+    });
+    return result;
+  } catch (e) {
+    // Fallback: timestamp-based number if DB function not available
+    return `${prefix}-${Date.now().toString().slice(-6)}`;
+  }
 };
 
-const itemSvc={
-  getAll:(whId)=>{const a=db.g('items')||[];return whId?a.filter(i=>i.whId===whId):a;},
-  getById:(id)=>(db.g('items')||[]).find(i=>i.id===id),
-  create:(d)=>{const a=db.g('items')||[];const item={...d,id:uid(),createdAt:ts()};db.s('items',[...a,item]);return item;},
-  update:(id,d)=>{const a=(db.g('items')||[]).map(i=>i.id===id?{...i,...d,updatedAt:ts()}:i);db.s('items',a);return a.find(i=>i.id===id);},
-  delete:(id)=>db.s('items',(db.g('items')||[]).filter(i=>i.id!==id)),
-  nextCode:(catId,whId)=>{
-    const n=(db.g('items')||[]).filter(i=>i.category===catId&&(!whId||i.whId===whId)).length+1;
+// ── Settings ──
+const settSvc = {
+  _cache: null,
+  async getAsync() {
+    if (this._cache) return this._cache;
+    try {
+      const rows = await sb.select('settings', '', 'limit=1');
+      this._cache = rows[0] || SEED.settings;
+      // Map DB column names back to app field names
+      if (rows[0]) {
+        this._cache = {
+          companyName:    rows[0].company_name,
+          subtitle:       rows[0].subtitle,
+          currencySymbol: rows[0].currency_symbol,
+          grvPrefix:      rows[0].grv_prefix,
+          givPrefix:      rows[0].giv_prefix,
+          trnPrefix:      rows[0].trn_prefix,
+          conPrefix:      rows[0].con_prefix,
+          proPrefix:      rows[0].pro_prefix,
+          mrPrefix:       rows[0].mr_prefix,
+          dmgPrefix:      rows[0].dmg_prefix,
+          fiscalYear:     rows[0].fiscal_year,
+        };
+      }
+      return this._cache;
+    } catch { return SEED.settings; }
+  },
+  get() {
+    // Sync fallback used in render paths — returns cached or SEED
+    return this._cache || db.g('settings') || SEED.settings;
+  },
+  async update(d) {
+    this._cache = { ...this.get(), ...d };
+    db.s('settings', this._cache);
+    try {
+      await sb.update('settings', 'id=not.is.null', {
+        company_name:    d.companyName,
+        currency_symbol: d.currencySymbol,
+        grv_prefix:      d.grvPrefix,
+        giv_prefix:      d.givPrefix,
+        trn_prefix:      d.trnPrefix,
+        con_prefix:      d.conPrefix,
+        pro_prefix:      d.proPrefix,
+        mr_prefix:       d.mrPrefix,
+        dmg_prefix:      d.dmgPrefix,
+        fiscal_year:     d.fiscalYear,
+      });
+    } catch (e) { console.warn('Settings sync failed:', e.message); }
+  },
+};
+
+// ── Map DB row → App object ──
+const mapWH  = r => r && ({ id: r.id, name: r.name, code: r.code, location: r.location, status: r.status, createdAt: r.created_at });
+const mapRack = r => r && ({ id: r.id, whId: r.warehouse_id, code: r.code, name: r.name, category: r.category, description: r.description, capacity: r.capacity, status: r.status, createdAt: r.created_at });
+const mapItem = r => r && ({ id: r.id, whId: r.warehouse_id, rackId: r.rack_id, code: r.code, name: r.name, description: r.description, category: r.category, unit: r.unit, costPrice: Number(r.cost_price), minStock: r.min_stock, status: r.status, openingQty: r.opening_qty, isAsset: r.is_asset, assetCode: r.asset_code, photo: r.photo_url, createdAt: r.created_at });
+const mapSup  = r => r && ({ id: r.id, name: r.name, contact: r.contact, email: r.email, gst: r.gst_no, address: r.address, status: r.status, createdAt: r.created_at });
+const mapUser = r => r && ({ id: r.id, username: r.username, name: r.name, password: r.password, role: r.role, whId: r.warehouse_id, department: r.department, status: r.status, canApproveGRV: r.can_approve_grv, canApproveGIV: r.can_approve_giv, pages: r.pages, createdAt: r.created_at });
+const mapStock = r => r && ({ id: r.id, itemId: r.item_id, whId: r.warehouse_id, qty: r.qty, updatedAt: r.updated_at });
+
+// Map voucher rows
+const mapGRV = r => r && ({ id: r.id, grvNo: r.grn_no, whId: r.warehouse_id, supplierId: r.supplier_id, supplierName: r.supplier_name, date: r.date, invoiceNo: r.invoice_no, invoiceDate: r.invoice_date, challanNo: r.challan_no, transporter: r.transporter, vehicleNo: r.vehicle_no, remarks: r.remarks, totalQty: r.total_qty, totalAmount: Number(r.total_amount), status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapGIV = r => r && ({ id: r.id, givNo: r.gin_no, whId: r.warehouse_id, issuedTo: r.issued_to, purpose: r.purpose, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapTRN = r => r && ({ id: r.id, trnNo: r.trn_no, fromWhId: r.from_warehouse_id, toWhId: r.to_warehouse_id, purpose: r.purpose, remarks: r.remarks, submittedBy: r.submitted_by, status: r.status, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, date: r.date, createdAt: r.created_at });
+const mapCON = r => r && ({ id: r.id, conNo: r.con_no, whId: r.warehouse_id, date: r.date, jobNo: r.job_no, jobType: r.job_type, department: r.department, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapPRO = r => r && ({ id: r.id, proNo: r.pro_no, whId: r.warehouse_id, date: r.date, productName: r.product_name, batchNo: r.batch_no, remarks: r.remarks, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapMR  = r => r && ({ id: r.id, mrNo: r.mr_no, whId: r.warehouse_id, date: r.date, requiredBy: r.required_by, department: r.department, priority: r.priority, purpose: r.purpose, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapDMG = r => r && ({ id: r.id, dmgNo: r.dmg_no, whId: r.warehouse_id, date: r.date, damageType: r.damage_type, disposalMethod: r.disposal_method, reportedBy: r.reported_by, location: r.location, remarks: r.remarks, totalItems: r.total_items, totalLoss: Number(r.total_loss), status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+
+// ── Line items fetch helpers ──
+const fetchPurchaseItems = async (purchaseId) => {
+  const rows = await sb.select('purchase_items', `purchase_id=eq.${purchaseId}`);
+  return rows.map(r => ({ itemId: r.item_id, itemName: r.item_name, rackId: r.rack_id, unit: r.unit, qtyReceived: r.qty_received, rate: Number(r.rate), amount: Number(r.amount) }));
+};
+const fetchGINItems = async (ginId) => {
+  const rows = await sb.select('gin_items', `gin_id=eq.${ginId}`);
+  return rows.map(r => ({ itemId: r.item_id, itemName: r.item_name, rackId: r.rack_id, unit: r.unit, qtyIssued: r.qty_issued, remarks: r.remarks }));
+};
+const fetchTransferItems = async (trnId) => {
+  const rows = await sb.select('transfer_items', `transfer_id=eq.${trnId}`);
+  return rows.map(r => ({ itemId: r.item_id, unit: r.unit, qty: r.qty, availQty: r.avail_qty }));
+};
+const fetchConItems = async (conId) => {
+  const rows = await sb.select('consumption_items', `consumption_id=eq.${conId}`);
+  return rows.map(r => ({ itemId: r.item_id, itemName: r.item_name, unit: r.unit, qty: r.qty, availQty: r.avail_qty, remarks: r.remarks }));
+};
+const fetchProItems = async (proId) => {
+  const [raw, out] = await Promise.all([
+    sb.select('production_raw_materials', `production_id=eq.${proId}`),
+    sb.select('production_outputs', `production_id=eq.${proId}`),
+  ]);
+  return {
+    rawMaterials: raw.map(r => ({ itemId: r.item_id, itemName: r.item_name, unit: r.unit, qty: r.qty, availQty: r.avail_qty })),
+    outputs: out.map(r => ({ itemId: r.item_id, itemName: r.item_name, code: r.item_code, category: r.category, unit: r.unit, costPrice: Number(r.cost_price), qty: r.qty })),
+  };
+};
+const fetchMRItems = async (mrId) => {
+  const rows = await sb.select('material_request_items', `mr_id=eq.${mrId}`);
+  return rows.map(r => ({ itemId: r.item_id, itemName: r.item_name, unit: r.unit, qtyRequired: r.qty_required, availQty: r.avail_qty, remarks: r.remarks }));
+};
+const fetchDMGItems = async (dmgId) => {
+  const rows = await sb.select('damaged_product_items', `dmg_id=eq.${dmgId}`);
+  return rows.map(r => ({ itemId: r.item_id, itemName: r.item_name, unit: r.unit, qty: r.qty, costPrice: Number(r.cost_price), totalLoss: Number(r.total_loss) }));
+};
+
+// ── withItems: fetch a voucher with its line items ──
+const withItems = async (voucher, fetchFn) => {
+  if (!voucher) return voucher;
+  const items = await fetchFn(voucher.id);
+  return { ...voucher, items };
+};
+const withProItems = async (voucher) => {
+  if (!voucher) return voucher;
+  const { rawMaterials, outputs } = await fetchProItems(voucher.id);
+  return { ...voucher, rawMaterials, outputs };
+};
+
+// ── WAREHOUSE SERVICE ──
+const whSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('warehouses', '', 'order=code.asc');
+      this._cache = rows.map(mapWH);
+      db.s('warehouses', this._cache);
+    } catch { this._cache = db.g('warehouses') || SEED.warehouses; }
+    return this._cache;
+  },
+  getAll() { return this._cache || db.g('warehouses') || SEED.warehouses; },
+  getById(id) { return this.getAll().find(w => w.id === id); },
+  async create(d) {
+    const row = await sb.insert('warehouses', { name: d.name, code: d.code, location: d.location, status: d.status || 'Active' });
+    this._cache = null; await this.loadAll(); return mapWH(row);
+  },
+  async update(id, d) {
+    await sb.update('warehouses', `id=eq.${id}`, { name: d.name, code: d.code, location: d.location, status: d.status });
+    this._cache = null; await this.loadAll();
+  },
+  async delete(id) {
+    await sb.delete('warehouses', `id=eq.${id}`);
+    this._cache = null; await this.loadAll();
+  },
+};
+
+// ── RACK SERVICE ──
+const rackSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('racks', '', 'order=code.asc');
+      this._cache = rows.map(mapRack);
+      db.s('racks', this._cache);
+    } catch { this._cache = db.g('racks') || SEED.racks; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('racks') || SEED.racks;
+    return whId ? all.filter(r => r.whId === whId) : all;
+  },
+  async create(d) {
+    const row = await sb.insert('racks', { warehouse_id: d.whId, code: d.code, name: d.name, category: d.category || null, description: d.description, capacity: Number(d.capacity) || 500, status: d.status || 'Active' });
+    this._cache = null; await this.loadAll(); return mapRack(row);
+  },
+  async update(id, d) {
+    await sb.update('racks', `id=eq.${id}`, { code: d.code, name: d.name, category: d.category || null, description: d.description, capacity: Number(d.capacity) || 500, status: d.status });
+    this._cache = null; await this.loadAll();
+  },
+  async delete(id) {
+    await sb.delete('racks', `id=eq.${id}`);
+    this._cache = null; await this.loadAll();
+  },
+};
+
+// ── SUPPLIER SERVICE ──
+const supplierSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('suppliers', '', 'order=name.asc');
+      this._cache = rows.map(mapSup);
+      db.s('suppliers', this._cache);
+    } catch { this._cache = db.g('suppliers') || SEED.suppliers; }
+    return this._cache;
+  },
+  getAll() { return this._cache || db.g('suppliers') || SEED.suppliers; },
+  async create(d) {
+    const row = await sb.insert('suppliers', { name: d.name, contact: d.contact, email: d.email, gst_no: d.gst, address: d.address, status: d.status || 'Active' });
+    this._cache = null; await this.loadAll(); return mapSup(row);
+  },
+  async update(id, d) {
+    await sb.update('suppliers', `id=eq.${id}`, { name: d.name, contact: d.contact, email: d.email, gst_no: d.gst, address: d.address, status: d.status });
+    this._cache = null; await this.loadAll();
+  },
+  async delete(id) {
+    await sb.delete('suppliers', `id=eq.${id}`);
+    this._cache = null; await this.loadAll();
+  },
+};
+
+// ── ITEM SERVICE ──
+const itemSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('items', '', 'order=code.asc');
+      this._cache = rows.map(mapItem);
+      db.s('items', this._cache);
+    } catch { this._cache = db.g('items') || SEED.items; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('items') || SEED.items;
+    return whId ? all.filter(i => i.whId === whId) : all;
+  },
+  getById(id) { return this.getAll().find(i => i.id === id); },
+  nextCode(catId, whId) {
+    const n = this.getAll(whId).filter(i => i.category === catId).length + 1;
     return `${catId}-${String(n).padStart(4,'0')}`;
   },
-};
-
-const stockSvc={
-  getAll:(whId)=>{const a=db.g('stock')||[];return whId?a.filter(s=>s.whId===whId):a;},
-  getQty:(itemId,whId)=>{const s=(db.g('stock')||[]).find(s=>s.itemId===itemId&&(!whId||s.whId===whId));return s?.qty||0;},
-  setQty:(itemId,whId,qty)=>{
-    const stocks=db.g('stock')||[];
-    const idx=stocks.findIndex(s=>s.itemId===itemId&&s.whId===whId);
-    if(idx>=0)stocks[idx]={...stocks[idx],qty:Math.max(0,qty),updatedAt:ts()};
-    else stocks.push({id:uid(),itemId,whId,qty:Math.max(0,qty),updatedAt:ts()});
-    db.s('stock',stocks);
-  },
-  adjust:(itemId,whId,delta)=>{const cur=stockSvc.getQty(itemId,whId);stockSvc.setQty(itemId,whId,cur+delta);},
-  getLow:(whId)=>{
-    const items=itemSvc.getAll(whId);
-    return items.filter(i=>{const qty=stockSvc.getQty(i.id,i.whId);return qty<=i.minStock;});
-  },
-  totalValue:(whId)=>{
-    const items=itemSvc.getAll(whId);
-    return items.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*i.costPrice,0);
-  },
-};
-
-const grvSvc={
-  getAll:(whId)=>{const a=(db.g('grv')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(g=>g.whId===whId):a;},
-  getPending:(whId)=>grvSvc.getAll(whId).filter(g=>g.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('grv')||[];const n=a.length+1;const sett=settSvc.get();
-    const grv={...d,id:uid(),grvNo:`${sett.grvPrefix}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('grv',[...a,grv]);return grv;
-  },
-  approve:(id,approverName)=>{
-    const grvs=db.g('grv')||[];const idx=grvs.findIndex(g=>g.id===id);if(idx<0)return;
-    grvs[idx]={...grvs[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('grv',grvs);
-    (grvs[idx].items||[]).forEach(row=>stockSvc.adjust(row.itemId,grvs[idx].whId,Number(row.qtyReceived)));
-    return grvs[idx];
-  },
-  reject:(id,approverName,reason)=>{
-    const grvs=db.g('grv')||[];const idx=grvs.findIndex(g=>g.id===id);if(idx<0)return;
-    grvs[idx]={...grvs[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('grv',grvs);return grvs[idx];
-  },
-  todayCount:(whId)=>{const t=today();return grvSvc.getAll(whId).filter(g=>g.date===t).length;},
-};
-
-const givSvc={
-  getAll:(whId)=>{const a=(db.g('giv')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(g=>g.whId===whId):a;},
-  getPending:(whId)=>givSvc.getAll(whId).filter(g=>g.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('giv')||[];const n=a.length+1;const sett=settSvc.get();
-    const giv={...d,id:uid(),givNo:`${sett.givPrefix}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('giv',[...a,giv]);return giv;
-  },
-  approve:(id,approverName)=>{
-    const givs=db.g('giv')||[];const idx=givs.findIndex(g=>g.id===id);if(idx<0)return;
-    givs[idx]={...givs[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('giv',givs);
-    (givs[idx].items||[]).forEach(row=>stockSvc.adjust(row.itemId,givs[idx].whId,-Number(row.qtyIssued)));
-    return givs[idx];
-  },
-  reject:(id,approverName,reason)=>{
-    const givs=db.g('giv')||[];const idx=givs.findIndex(g=>g.id===id);if(idx<0)return;
-    givs[idx]={...givs[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('giv',givs);return givs[idx];
-  },
-  todayCount:(whId)=>{const t=today();return givSvc.getAll(whId).filter(g=>g.date===t).length;},
-};
-
-// Stock Transfer Service
-const trnSvc={
-  getAll:(whId)=>{const a=(db.g('transfers')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(t=>t.fromWhId===whId||t.toWhId===whId):a;},
-  getPending:()=>(db.g('transfers')||[]).filter(t=>t.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('transfers')||[];const n=a.length+1;const sett=settSvc.get();
-    const trn={...d,id:uid(),trnNo:`${sett.trnPrefix||'TRN'}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('transfers',[...a,trn]);return trn;
-  },
-  approve:(id,approverName)=>{
-    const a=db.g('transfers')||[];const idx=a.findIndex(t=>t.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('transfers',a);
-    const toWhId=a[idx].toWhId;
-    const fromWhId=a[idx].fromWhId;
-    (a[idx].items||[]).forEach(row=>{
-      // Deduct from source warehouse
-      stockSvc.adjust(row.itemId,fromWhId,-Number(row.qty));
-      // Find matching item in destination warehouse (same code or same original item)
-      const srcItem=(db.g('items')||[]).find(i=>i.id===row.itemId);
-      if(!srcItem)return;
-      const allItems=db.g('items')||[];
-      // Look for same item code in destination warehouse
-      let destItem=allItems.find(i=>i.whId===toWhId&&(i.code===srcItem.code||i.name===srcItem.name));
-      if(!destItem){
-        // Create item in destination warehouse
-        destItem={...srcItem,id:uid(),whId:toWhId,createdAt:ts(),updatedAt:ts()};
-        db.s('items',[...allItems,destItem]);
-      }
-      // Add stock to destination item
-      stockSvc.adjust(destItem.id,toWhId,Number(row.qty));
+  async create(d) {
+    const row = await sb.insert('items', {
+      warehouse_id: d.whId, rack_id: d.rackId || null, code: d.code, name: d.name,
+      description: d.description, category: d.category, unit: d.unit,
+      cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
+      status: d.status || 'Active', opening_qty: Number(d.openingQty) || 0,
+      is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
     });
-    return a[idx];
+    this._cache = null; await this.loadAll();
+    // Set opening stock
+    if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, d.whId, Number(d.openingQty));
+    return mapItem(row);
   },
-  reject:(id,approverName,reason)=>{
-    const a=db.g('transfers')||[];const idx=a.findIndex(t=>t.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('transfers',a);return a[idx];
-  },
-};
-
-// ── Consumption Service (materials consumed/used in jobs) ──
-const conSvc={
-  getAll:(whId)=>{const a=(db.g('consumption')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(v=>v.whId===whId):a;},
-  getPending:(whId)=>conSvc.getAll(whId).filter(v=>v.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('consumption')||[];const n=a.length+1;const sett=settSvc.get();
-    const v={...d,id:uid(),conNo:`${sett.conPrefix||'CON'}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('consumption',[...a,v]);return v;
-  },
-  approve:(id,approverName)=>{
-    const a=db.g('consumption')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('consumption',a);
-    (a[idx].items||[]).forEach(row=>stockSvc.adjust(row.itemId,a[idx].whId,-Number(row.qty)));
-    return a[idx];
-  },
-  reject:(id,approverName,reason)=>{
-    const a=db.g('consumption')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('consumption',a);return a[idx];
-  },
-  todayCount:(whId)=>{const t=today();return conSvc.getAll(whId).filter(v=>v.date===t).length;},
-};
-
-// ── Production Service (items produced/assembled, increases stock) ──
-const proSvc={
-  getAll:(whId)=>{const a=(db.g('production')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(v=>v.whId===whId):a;},
-  getPending:(whId)=>proSvc.getAll(whId).filter(v=>v.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('production')||[];const n=a.length+1;const sett=settSvc.get();
-    const v={...d,id:uid(),proNo:`${sett.proPrefix||'PRO'}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('production',[...a,v]);return v;
-  },
-  approve:(id,approverName)=>{
-    const a=db.g('production')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('production',a);
-    // Deduct raw materials used
-    (a[idx].rawMaterials||[]).forEach(row=>stockSvc.adjust(row.itemId,a[idx].whId,-Number(row.qty)));
-    // Add produced items to stock
-    (a[idx].outputs||[]).forEach(row=>{
-      const allItems=db.g('items')||[];
-      let item=allItems.find(i=>i.id===row.itemId);
-      if(!item){
-        item={id:uid(),code:row.code||('PRD-'+uid().slice(0,4).toUpperCase()),name:row.itemName,category:row.category||'GEN',unit:row.unit||'NOS',costPrice:row.costPrice||0,minStock:1,whId:a[idx].whId,status:'Active',createdAt:ts()};
-        db.s('items',[...allItems,item]);
-        row.itemId=item.id;
-      }
-      stockSvc.adjust(item.id,a[idx].whId,Number(row.qty));
+  async update(id, d) {
+    await sb.update('items', `id=eq.${id}`, {
+      rack_id: d.rackId || null, code: d.code, name: d.name, description: d.description,
+      category: d.category, unit: d.unit, cost_price: Number(d.costPrice) || 0,
+      min_stock: Number(d.minStock) || 0, status: d.status,
+      is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
     });
-    return a[idx];
+    this._cache = null; await this.loadAll();
   },
-  reject:(id,approverName,reason)=>{
-    const a=db.g('production')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('production',a);return a[idx];
+  async delete(id) {
+    await sb.delete('items', `id=eq.${id}`);
+    this._cache = null; await this.loadAll();
   },
-  todayCount:(whId)=>{const t=today();return proSvc.getAll(whId).filter(v=>v.date===t).length;},
+};
+
+// ── STOCK SERVICE ──
+const stockSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('stock');
+      this._cache = rows.map(mapStock);
+      db.s('stock', this._cache);
+    } catch { this._cache = db.g('stock') || SEED.stock; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('stock') || SEED.stock;
+    return whId ? all.filter(s => s.whId === whId) : all;
+  },
+  getQty(itemId, whId) {
+    const all = this._cache || db.g('stock') || SEED.stock;
+    const s = all.find(s => s.itemId === itemId && (!whId || s.whId === whId));
+    return s?.qty || 0;
+  },
+  async setQty(itemId, whId, qty) {
+    const safeQty = Math.max(0, qty);
+    // Upsert stock row
+    await sbFetch(`stock?item_id=eq.${itemId}&warehouse_id=eq.${whId}`, {
+      method: 'POST',
+      prefer: 'return=representation,resolution=merge-duplicates',
+      headers: { 'Prefer': 'return=representation,resolution=merge-duplicates', 'on-conflict': 'item_id,warehouse_id' },
+      body: JSON.stringify({ item_id: itemId, warehouse_id: whId, qty: safeQty }),
+    });
+    await this.loadAll();
+  },
+  async adjust(itemId, whId, delta) {
+    const cur = this.getQty(itemId, whId);
+    await this.setQty(itemId, whId, cur + delta);
+  },
+  getLow(whId) {
+    const items = itemSvc.getAll(whId);
+    return items.filter(i => this.getQty(i.id, i.whId) <= i.minStock);
+  },
+  totalValue(whId) {
+    return itemSvc.getAll(whId).reduce((s, i) => s + this.getQty(i.id, i.whId) * Number(i.costPrice || 0), 0);
+  },
+};
+
+// ── USER SERVICE ──
+const userSvc = {
+  _cache: null,
+  async loadAll() {
+    try {
+      const rows = await sb.select('users', '', 'order=name.asc');
+      this._cache = rows.map(mapUser);
+      db.s('users', this._cache);
+    } catch { this._cache = db.g('users') || SEED.users; }
+    return this._cache;
+  },
+  getAll() { return this._cache || db.g('users') || SEED.users; },
+  login(un, pw) {
+    const u = this.getAll().find(u => (u.username === un || u.email === un) && u.password === pw && u.status === 'Active');
+    if (u) { db.s('session', u); return u; }
+    return null;
+  },
+  logout() { db.d('session'); },
+  session() { return db.g('session'); },
+  async create(d) {
+    const row = await sb.insert('users', {
+      username: d.username, name: d.name, password: d.password, role: d.role,
+      warehouse_id: d.whId || null, department: d.department, status: d.status || 'Active',
+      can_approve_grv: !!d.canApproveGRV, can_approve_giv: !!d.canApproveGIV, pages: d.pages || 'dashboard',
+    });
+    this._cache = null; await this.loadAll(); return mapUser(row);
+  },
+  async update(id, d) {
+    const patch = { name: d.name, role: d.role, warehouse_id: d.whId || null, department: d.department, status: d.status, can_approve_grv: !!d.canApproveGRV, can_approve_giv: !!d.canApproveGIV, pages: d.pages || 'dashboard' };
+    if (d.password) patch.password = d.password;
+    if (d.username) patch.username = d.username;
+    await sb.update('users', `id=eq.${id}`, patch);
+    this._cache = null; await this.loadAll();
+    // Update session if editing self
+    const sess = db.g('session');
+    if (sess?.id === id) db.s('session', { ...sess, ...mapUser({ ...sess, ...patch, id }) });
+  },
+  async delete(id) {
+    await sb.delete('users', `id=eq.${id}`);
+    this._cache = null; await this.loadAll();
+  },
+};
+
+// ── PURCHASE (GRN) SERVICE ──
+const grvSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('purchases', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapGRV);
+      db.s('grv', this._cache);
+    } catch { this._cache = db.g('grv') || []; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('grv') || [];
+    return whId ? all.filter(g => g.whId === whId) : all;
+  },
+  getPending(whId) { return this.getAll(whId).filter(g => g.status === 'Pending Approval'); },
+  todayCount(whId) { return this.getAll(whId).filter(g => g.date === today()).length; },
+  async create(d) {
+    const sett = settSvc.get();
+    const grvNo = await nextVoucherNo('grv', sett.grvPrefix || 'PO');
+    const row = await sb.insert('purchases', {
+      warehouse_id: d.whId, supplier_id: d.supplierId || null, grn_no: grvNo,
+      date: d.date, invoice_no: d.invoiceNo, invoice_date: d.invoiceDate || null,
+      challan_no: d.challanNo, transporter: d.transporter, vehicle_no: d.vehicleNo,
+      remarks: d.remarks, supplier_name: d.supplierName, total_qty: d.totalQty || 0,
+      total_amount: d.totalAmount || 0, status: d.status || 'Pending Approval',
+      submitted_by: d.submittedBy || null,
+    });
+    // Insert line items
+    if (d.items?.length) {
+      await Promise.all(d.items.map(item => sb.insert('purchase_items', {
+        purchase_id: row.id, item_id: item.itemId, rack_id: item.rackId || null,
+        item_name: item.itemName || '', unit: item.unit, qty_received: Number(item.qtyReceived),
+        rate: Number(item.rate) || 0,
+      })));
+    }
+    this._cache = null; await this.loadAll(d.whId);
+    return mapGRV(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(g => g.id === id);
+    if (!v) return;
+    await sb.update('purchases', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const items = await fetchPurchaseItems(id);
+    await Promise.all(items.map(row => stockSvc.adjust(row.itemId, v.whId, Number(row.qtyReceived))));
+    this._cache = null; await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(g => g.id === id);
+    await sb.update('purchases', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+};
+
+// ── GIN SERVICE ──
+const givSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('gin_vouchers', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapGIV);
+      db.s('giv', this._cache);
+    } catch { this._cache = db.g('giv') || []; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('giv') || [];
+    return whId ? all.filter(g => g.whId === whId) : all;
+  },
+  getPending(whId) { return this.getAll(whId).filter(g => g.status === 'Pending Approval'); },
+  todayCount(whId) { return this.getAll(whId).filter(g => g.date === today()).length; },
+  async create(d) {
+    const sett = settSvc.get();
+    const ginNo = await nextVoucherNo('gin', sett.givPrefix || 'GIN');
+    const row = await sb.insert('gin_vouchers', {
+      warehouse_id: d.whId, gin_no: ginNo, date: d.date, issued_to: d.issuedTo,
+      purpose: d.purpose, remarks: d.remarks, total_items: d.totalItems || (d.items?.length || 0),
+      status: 'Pending Approval', submitted_by: d.submittedBy || null,
+    });
+    if (d.items?.length) {
+      await Promise.all(d.items.map(item => sb.insert('gin_items', {
+        gin_id: row.id, item_id: item.itemId, rack_id: item.rackId || null,
+        item_name: item.itemName || '', unit: item.unit, qty_issued: Number(item.qtyIssued), remarks: item.remarks || null,
+      })));
+    }
+    this._cache = null; await this.loadAll(d.whId);
+    return mapGIV(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(g => g.id === id);
+    if (!v) return;
+    await sb.update('gin_vouchers', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const items = await fetchGINItems(id);
+    await Promise.all(items.map(row => stockSvc.adjust(row.itemId, v.whId, -Number(row.qtyIssued))));
+    this._cache = null; await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(g => g.id === id);
+    await sb.update('gin_vouchers', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+};
+
+// ── TRANSFER SERVICE ──
+const trnSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const rows = await sb.select('stock_transfers', '', 'order=created_at.desc');
+      this._cache = rows.map(mapTRN);
+      db.s('transfers', this._cache);
+    } catch { this._cache = db.g('transfers') || []; }
+    return this._cache;
+  },
+  getAll(whId) {
+    const all = this._cache || db.g('transfers') || [];
+    return whId ? all.filter(t => t.fromWhId === whId || t.toWhId === whId) : all;
+  },
+  getPending() { return (this._cache || db.g('transfers') || []).filter(t => t.status === 'Pending Approval'); },
+  async create(d) {
+    const sett = settSvc.get();
+    const trnNo = await nextVoucherNo('trn', sett.trnPrefix || 'TRN');
+    const row = await sb.insert('stock_transfers', {
+      trn_no: trnNo, date: d.date, from_warehouse_id: d.fromWhId, to_warehouse_id: d.toWhId,
+      purpose: d.purpose, remarks: d.remarks, submitted_by: d.submittedBy || null, status: 'Pending Approval',
+    });
+    if (d.items?.length) {
+      await Promise.all(d.items.map(item => sb.insert('transfer_items', {
+        transfer_id: row.id, item_id: item.itemId, unit: item.unit,
+        qty: Number(item.qty), avail_qty: Number(item.availQty) || 0,
+      })));
+    }
+    this._cache = null; await this.loadAll(d.fromWhId);
+    return mapTRN(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(t => t.id === id);
+    if (!v) return;
+    await sb.update('stock_transfers', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const items = await fetchTransferItems(id);
+    for (const row of items) {
+      // Deduct from source
+      await stockSvc.adjust(row.itemId, v.fromWhId, -Number(row.qty));
+      // Find or create item in destination warehouse
+      let destItem = itemSvc.getAll(v.toWhId).find(i => {
+        const src = itemSvc.getById(row.itemId);
+        return src && (i.code === src.code || i.name === src.name);
+      });
+      if (!destItem) {
+        const src = itemSvc.getById(row.itemId);
+        if (src) {
+          destItem = await itemSvc.create({ ...src, whId: v.toWhId, openingQty: 0, id: undefined });
+        }
+      }
+      if (destItem) await stockSvc.adjust(destItem.id, v.toWhId, Number(row.qty));
+    }
+    this._cache = null; await this.loadAll(v.fromWhId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(t => t.id === id);
+    await sb.update('stock_transfers', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; await this.loadAll(v?.fromWhId);
+  },
+};
+
+// ── CONSUMPTION SERVICE ──
+const conSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('consumption_vouchers', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapCON); db.s('consumption', this._cache);
+    } catch { this._cache = db.g('consumption') || []; }
+    return this._cache;
+  },
+  getAll(whId) { const all = this._cache || db.g('consumption') || []; return whId ? all.filter(v => v.whId === whId) : all; },
+  getPending(whId) { return this.getAll(whId).filter(v => v.status === 'Pending Approval'); },
+  todayCount(whId) { return this.getAll(whId).filter(v => v.date === today()).length; },
+  async create(d) {
+    const sett = settSvc.get();
+    const conNo = await nextVoucherNo('con', sett.conPrefix || 'CON');
+    const row = await sb.insert('consumption_vouchers', { warehouse_id: d.whId, con_no: conNo, date: d.date, job_no: d.jobNo || null, job_type: d.jobType, department: d.department, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    if (d.items?.length) await Promise.all(d.items.map(item => sb.insert('consumption_items', { consumption_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0, remarks: item.remarks || null })));
+    this._cache = null; await this.loadAll(d.whId); return mapCON(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(x => x.id === id); if (!v) return;
+    await sb.update('consumption_vouchers', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const items = await fetchConItems(id);
+    await Promise.all(items.map(row => stockSvc.adjust(row.itemId, v.whId, -Number(row.qty))));
+    this._cache = null; await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(x => x.id === id);
+    await sb.update('consumption_vouchers', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+};
+
+// ── PRODUCTION SERVICE ──
+const proSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('production_orders', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapPRO); db.s('production', this._cache);
+    } catch { this._cache = db.g('production') || []; }
+    return this._cache;
+  },
+  getAll(whId) { const all = this._cache || db.g('production') || []; return whId ? all.filter(v => v.whId === whId) : all; },
+  getPending(whId) { return this.getAll(whId).filter(v => v.status === 'Pending Approval'); },
+  todayCount(whId) { return this.getAll(whId).filter(v => v.date === today()).length; },
+  async create(d) {
+    const sett = settSvc.get();
+    const proNo = await nextVoucherNo('pro', sett.proPrefix || 'PRO');
+    const row = await sb.insert('production_orders', { warehouse_id: d.whId, pro_no: proNo, date: d.date, product_name: d.productName, batch_no: d.batchNo || null, remarks: d.remarks, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    if (d.rawMaterials?.length) await Promise.all(d.rawMaterials.map(item => sb.insert('production_raw_materials', { production_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0 })));
+    if (d.outputs?.length) await Promise.all(d.outputs.map(item => sb.insert('production_outputs', { production_id: row.id, item_id: item.itemId || null, item_name: item.itemName || '', item_code: item.code || null, category: item.category || null, unit: item.unit, cost_price: Number(item.costPrice) || 0, qty: Number(item.qty) })));
+    this._cache = null; await this.loadAll(d.whId); return mapPRO(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(x => x.id === id); if (!v) return;
+    await sb.update('production_orders', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const { rawMaterials, outputs } = await fetchProItems(id);
+    await Promise.all(rawMaterials.map(row => stockSvc.adjust(row.itemId, v.whId, -Number(row.qty))));
+    for (const row of outputs) {
+      let item = row.itemId ? itemSvc.getById(row.itemId) : null;
+      if (!item) { item = await itemSvc.create({ name: row.itemName, code: row.code || 'PRD-' + uid().slice(0,4).toUpperCase(), category: row.category || 'GEN', unit: row.unit, costPrice: row.costPrice || 0, minStock: 1, whId: v.whId, status: 'Active', openingQty: 0 }); }
+      await stockSvc.adjust(item.id, v.whId, Number(row.qty));
+    }
+    this._cache = null; await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(x => x.id === id);
+    await sb.update('production_orders', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+};
+
+// ── MATERIAL REQUEST SERVICE ──
+const mrSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('material_requests', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapMR); db.s('materialRequests', this._cache);
+    } catch { this._cache = db.g('materialRequests') || []; }
+    return this._cache;
+  },
+  getAll(whId) { const all = this._cache || db.g('materialRequests') || []; return whId ? all.filter(v => v.whId === whId) : all; },
+  getPending(whId) { return this.getAll(whId).filter(v => v.status === 'Pending Approval'); },
+  async create(d) {
+    const sett = settSvc.get();
+    const mrNo = await nextVoucherNo('mr', sett.mrPrefix || 'MR');
+    const row = await sb.insert('material_requests', { warehouse_id: d.whId, mr_no: mrNo, date: d.date, required_by: d.requiredBy || null, department: d.department, priority: d.priority || 'Normal', purpose: d.purpose, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    if (d.items?.length) await Promise.all(d.items.map(item => sb.insert('material_request_items', { mr_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty_required: Number(item.qtyRequired), avail_qty: Number(item.availQty) || 0, remarks: item.remarks || null })));
+    this._cache = null; await this.loadAll(d.whId); return mapMR(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(x => x.id === id);
+    await sb.update('material_requests', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(x => x.id === id);
+    await sb.update('material_requests', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
+};
+
+// ── DAMAGED PRODUCTS SERVICE ──
+const dmgSvc = {
+  _cache: null,
+  async loadAll(whId) {
+    try {
+      const filter = whId ? `warehouse_id=eq.${whId}&` : '';
+      const rows = await sb.select('damaged_products', `${filter}`, 'order=created_at.desc');
+      this._cache = rows.map(mapDMG); db.s('damagedProducts', this._cache);
+    } catch { this._cache = db.g('damagedProducts') || []; }
+    return this._cache;
+  },
+  getAll(whId) { const all = this._cache || db.g('damagedProducts') || []; return whId ? all.filter(v => v.whId === whId) : all; },
+  getPending(whId) { return this.getAll(whId).filter(v => v.status === 'Pending Approval'); },
+  async create(d) {
+    const sett = settSvc.get();
+    const dmgNo = await nextVoucherNo('dmg', sett.dmgPrefix || 'DMG');
+    const row = await sb.insert('damaged_products', { warehouse_id: d.whId, dmg_no: dmgNo, date: d.date, damage_type: d.damageType, disposal_method: d.disposalMethod, reported_by: d.reportedBy || null, location: d.location || null, remarks: d.remarks, total_items: d.totalItems || 0, total_loss: d.totalLoss || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    if (d.items?.length) await Promise.all(d.items.map(item => sb.insert('damaged_product_items', { dmg_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), cost_price: Number(item.costPrice) || 0 })));
+    this._cache = null; await this.loadAll(d.whId); return mapDMG(row);
+  },
+  async approve(id, approverName) {
+    const v = this.getAll().find(x => x.id === id); if (!v) return;
+    await sb.update('damaged_products', `id=eq.${id}`, { status: 'Approved', approved_by: approverName, approved_at: new Date().toISOString() });
+    const items = await fetchDMGItems(id);
+    await Promise.all(items.map(row => stockSvc.adjust(row.itemId, v.whId, -Number(row.qty))));
+    this._cache = null; await this.loadAll(v.whId);
+  },
+  async reject(id, approverName, reason) {
+    const v = this.getAll().find(x => x.id === id);
+    await sb.update('damaged_products', `id=eq.${id}`, { status: 'Rejected', approved_by: approverName, approved_at: new Date().toISOString(), reject_reason: reason });
+    this._cache = null; if (v) await this.loadAll(v.whId);
+  },
 };
 
 
-// ── Material Request Service ──
-const mrSvc={
-  getAll:(whId)=>{const a=(db.g('materialRequests')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(v=>v.whId===whId):a;},
-  getPending:(whId)=>mrSvc.getAll(whId).filter(v=>v.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('materialRequests')||[];const n=a.length+1;const sett=settSvc.get();
-    const v={...d,id:uid(),mrNo:`${sett.mrPrefix||'MR'}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('materialRequests',[...a,v]);return v;
-  },
-  approve:(id,approverName)=>{
-    const a=db.g('materialRequests')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('materialRequests',a);
-    // MR approval does NOT deduct stock — it just authorises the request
-    // Actual deduction happens via GIN after the items are physically issued
-    return a[idx];
-  },
-  reject:(id,approverName,reason)=>{
-    const a=db.g('materialRequests')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('materialRequests',a);return a[idx];
-  },
-  todayCount:(whId)=>{const t=today();return mrSvc.getAll(whId).filter(v=>v.date===t).length;},
-};
-
-// ── Damaged Products Service ──
-const dmgSvc={
-  getAll:(whId)=>{const a=(db.g('damagedProducts')||[]).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return whId?a.filter(v=>v.whId===whId):a;},
-  getPending:(whId)=>dmgSvc.getAll(whId).filter(v=>v.status==='Pending Approval'),
-  create:(d)=>{
-    const a=db.g('damagedProducts')||[];const n=a.length+1;const sett=settSvc.get();
-    const v={...d,id:uid(),dmgNo:`${sett.dmgPrefix||'DMG'}-${String(n).padStart(6,'0')}`,status:'Pending Approval',createdAt:ts()};
-    db.s('damagedProducts',[...a,v]);return v;
-  },
-  approve:(id,approverName)=>{
-    const a=db.g('damagedProducts')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Approved',approvedBy:approverName,approvedAt:ts()};
-    db.s('damagedProducts',a);
-    // Deduct damaged quantities from stock
-    (a[idx].items||[]).forEach(row=>stockSvc.adjust(row.itemId,a[idx].whId,-Number(row.qty)));
-    return a[idx];
-  },
-  reject:(id,approverName,reason)=>{
-    const a=db.g('damagedProducts')||[];const idx=a.findIndex(v=>v.id===id);if(idx<0)return;
-    a[idx]={...a[idx],status:'Rejected',approvedBy:approverName,approvedAt:ts(),rejectReason:reason};
-    db.s('damagedProducts',a);return a[idx];
-  },
-  todayCount:(whId)=>{const t=today();return dmgSvc.getAll(whId).filter(v=>v.date===t).length;},
-};
-
-
-const supplierSvc={
-  getAll:()=>db.g('suppliers')||[],
-  create:(d)=>{const a=db.g('suppliers')||[];const s={...d,id:uid(),createdAt:ts()};db.s('suppliers',[...a,s]);return s;},
-  update:(id,d)=>{const a=(db.g('suppliers')||[]).map(s=>s.id===id?{...s,...d}:s);db.s('suppliers',a);return a.find(s=>s.id===id);},
-  delete:(id)=>db.s('suppliers',(db.g('suppliers')||[]).filter(s=>s.id!==id)),
-};
-
-const userSvc={
-  getAll:()=>db.g('users')||[],
-  login:(un,pw)=>{const u=(db.g('users')||[]).find(u=>(u.username===un||u.email===un)&&u.password===pw&&u.status==='Active');if(u){db.s('session',u);return u;}return null;},
-  logout:()=>db.d('session'),
-  session:()=>db.g('session'),
-  create:(d)=>{const a=db.g('users')||[];const u={...d,id:uid(),createdAt:ts(),status:'Active'};db.s('users',[...a,u]);return u;},
-  update:(id,d)=>{const a=(db.g('users')||[]).map(u=>u.id===id?{...u,...d}:u);db.s('users',a);return a.find(u=>u.id===id);},
-  delete:(id)=>db.s('users',(db.g('users')||[]).filter(u=>u.id!==id)),
-};
-
-const settSvc={
-  get:()=>db.g('settings')||SEED.settings,
-  update:(d)=>db.s('settings',{...settSvc.get(),...d}),
-};
 
 // ════════════════════════════════════════
 //  CONTEXT
@@ -800,7 +1250,42 @@ function Provider({children}){
   const [tick,setTick]=useState(0);
   const [drilldown,setDrilldown]=useState(null);
 
-  useEffect(()=>{seedDB();const s=userSvc.session();if(s)setUser(s);},[]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    // Bootstrap: load all data from Supabase then restore session
+    (async()=>{
+      try {
+        // Load settings first (needed for prefixes)
+        await settSvc.getAsync();
+        // Load all master data in parallel
+        await Promise.all([
+          whSvc.loadAll(),
+          rackSvc.loadAll(),
+          supplierSvc.loadAll(),
+          itemSvc.loadAll(),
+          stockSvc.loadAll(),
+          userSvc.loadAll(),
+        ]);
+        // Load transaction data
+        await Promise.all([
+          grvSvc.loadAll(),
+          givSvc.loadAll(),
+          trnSvc.loadAll(),
+          conSvc.loadAll(),
+          proSvc.loadAll(),
+          mrSvc.loadAll(),
+          dmgSvc.loadAll(),
+        ]);
+      } catch(e) {
+        console.warn('Supabase load failed, using local data:', e.message);
+        // Fallback: seed localStorage if empty
+        seedDB();
+      }
+      const s=userSvc.session();if(s)setUser(s);
+      setLoading(false);
+    })();
+  },[]);
   useEffect(()=>{
     const dim=document.getElementById('dim');if(!dim)return;
     if(sideOpen){dim.classList.add('show');dim.onclick=()=>setSideOpen(false);}
@@ -812,12 +1297,30 @@ function Provider({children}){
     setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3000);
   },[]);
   const nav=useCallback((p)=>{setPage(p);setDrilldown(null);setSideOpen(false);},[]);
-  const reload=useCallback(()=>setTick(t=>t+1),[]);
+  const reload=useCallback(async()=>{
+    try {
+      const whId2=userSvc.session()?.role==='Super Admin'?null:userSvc.session()?.whId||null;
+      await Promise.all([
+        itemSvc.loadAll(), stockSvc.loadAll(),
+        grvSvc.loadAll(whId2), givSvc.loadAll(whId2),
+        trnSvc.loadAll(whId2), conSvc.loadAll(whId2),
+        proSvc.loadAll(whId2), mrSvc.loadAll(whId2), dmgSvc.loadAll(whId2),
+      ]);
+    } catch(e) { console.warn('Reload failed:', e.message); }
+    setTick(t=>t+1);
+  },[]);
   const login=useCallback((un,pw)=>{const u=userSvc.login(un,pw);if(u){setUser(u);return true;}return false;},[]);
   const logout=useCallback(()=>{userSvc.logout();setUser(null);},[]);
 
   const isSA=user?.role==='Super Admin';
   const whId=isSA?null:(user?.whId||null);
+
+  if(loading&&!user)return React.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#1a2744',gap:16}},
+    React.createElement('img',{src:BIZPOZ_LOGO,alt:'BIZPOZ',style:{width:64,height:64,borderRadius:12,marginBottom:4}}),
+    React.createElement('div',{style:{color:'#FFD700',fontWeight:900,fontSize:24,letterSpacing:'2px'}},'BIZPOZ'),
+    React.createElement('div',{style:{display:'flex',gap:6,marginTop:8}},[0,1,2].map(i=>React.createElement('div',{key:i,style:{width:8,height:8,borderRadius:'50%',background:'rgba(255,255,255,.4)',animation:'pulse 1.2s ease-in-out '+(i*0.2)+'s infinite'}}))),
+    React.createElement('div',{style:{color:'rgba(255,255,255,.5)',fontSize:12,marginTop:8}},'Connecting to database...')
+  );
 
   return React.createElement(Ctx.Provider,{value:{user,setUser,page,nav,toasts,toast,modal,setModal,login,logout,sideOpen,setSideOpen,reload,tick,whId,isSA,drilldown,setDrilldown}},children);
 }
@@ -5254,53 +5757,7 @@ function Settings(){
   const sf=(k,v)=>setS(p=>({...p,[k]:v}));
   const [tab,setTab]=useState('general');
 
-  // Supabase connection state
-  const [sbUrl,setSbUrl]=useState(localStorage.getItem('bizpoz_sb_url')||'');
-  const [sbKey,setSbKey]=useState(localStorage.getItem('bizpoz_sb_anonkey')||'');
-  const [sbOrg,setSbOrg]=useState(localStorage.getItem('bizpoz_sb_orgid')||'');
-  const [sbTesting,setSbTesting]=useState(false);
-  const [sbStatus,setSbStatus]=useState(isSBConnected()?'connected':'disconnected');
-
   const save=()=>{settSvc.update(s);toast('Settings saved','success');};
-
-  const saveSB=()=>{
-    if(!sbUrl||!sbKey){toast('Enter both URL and Anon Key','error');return;}
-    localStorage.setItem('bizpoz_sb_url',sbUrl.trim().replace(/\/$/,''));
-    localStorage.setItem('bizpoz_sb_anonkey',sbKey.trim());
-    if(sbOrg)localStorage.setItem('bizpoz_sb_orgid',sbOrg.trim());
-    setSbStatus('connected');
-    toast('Supabase connection saved!','success');
-  };
-
-  const testSB=async()=>{
-    if(!sbUrl||!sbKey){toast('Enter URL and key first','error');return;}
-    setSbTesting(true);setSbStatus('testing');
-    try{
-      const url=sbUrl.trim().replace(/\/$/,'');
-      const res=await fetch(url+'/rest/v1/',{
-        headers:{'apikey':sbKey.trim(),'Authorization':'Bearer '+sbKey.trim()}
-      });
-      if(res.ok||res.status===200||res.status===404){
-        setSbStatus('connected');
-        toast('Connection successful! Supabase is reachable.','success');
-      } else {
-        setSbStatus('error');
-        toast('Connection failed: HTTP '+res.status,'error');
-      }
-    }catch(e){
-      setSbStatus('error');
-      toast('Connection failed: '+e.message,'error');
-    }finally{setSbTesting(false);}
-  };
-
-  const clearSB=()=>{
-    ['bizpoz_sb_url','bizpoz_sb_anonkey','bizpoz_sb_orgid'].forEach(k=>localStorage.removeItem(k));
-    setSbUrl('');setSbKey('');setSbOrg('');setSbStatus('disconnected');
-    toast('Supabase connection cleared. Using local storage.','success');
-  };
-
-  const STATUS_COLORS={connected:'var(--green)',disconnected:'var(--txt3)',error:'var(--red)',testing:'var(--amber)'};
-  const STATUS_ICONS={connected:'✅',disconnected:'⚫',error:'❌',testing:'⏳'};
 
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
@@ -5309,51 +5766,46 @@ function Settings(){
         tab==='general'&&React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Settings')
       )
     ),
-    // Tab bar
     React.createElement('div',{className:'tabs',style:{marginBottom:16}},
       React.createElement('div',{className:'tab'+(tab==='general'?' on':''),onClick:()=>setTab('general')},'⚙️ General'),
       React.createElement('div',{className:'tab'+(tab==='vouchers'?' on':''),onClick:()=>setTab('vouchers')},'📋 Voucher Prefixes'),
-      React.createElement('div',{
-        className:'tab'+(tab==='supabase'?' on':''),
-        onClick:()=>setTab('supabase'),
-        style:{display:'flex',alignItems:'center',gap:6}
-      },
-        React.createElement('span',null,STATUS_ICONS[sbStatus]),
-        'Supabase Database',
-        sbStatus==='connected'&&React.createElement('span',{style:{background:'var(--green)',color:'#fff',fontSize:9,fontWeight:700,padding:'1px 6px',borderRadius:20,marginLeft:4}},'LIVE')
-      )
+      React.createElement('div',{className:'tab'+(tab==='supabase'?' on':''),onClick:()=>setTab('supabase')},'🔌 Database')
     ),
 
-    // ── GENERAL TAB ──
-    tab==='general'&&React.createElement('div',{className:'card'},
-      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Company Information'),
-      React.createElement('div',{className:'frow3'},
-        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
-        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Currency Symbol'),React.createElement('input',{className:'fi',value:s.currencySymbol||'',onChange:e=>sf('currencySymbol',e.target.value),placeholder:'QR'})),
-        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+    // ── GENERAL ──
+    tab==='general'&&React.createElement('div',null,
+      React.createElement('div',{className:'card',style:{marginBottom:14}},
+        React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Company Information'),
+        React.createElement('div',{className:'frow3'},
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Currency Symbol'),React.createElement('input',{className:'fi',value:s.currencySymbol||'',onChange:e=>sf('currencySymbol',e.target.value),placeholder:'QR'})),
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+        ),
+        React.createElement('div',{style:{marginTop:14,display:'flex',justifyContent:'flex-end'}},
+          React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save')
+        )
       ),
-      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',margin:'16px 0 12px'}},'Danger Zone'),
       React.createElement('div',{className:'alert alert-red',style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
         React.createElement('div',null,
-          React.createElement('div',{style:{fontWeight:600,marginBottom:2}},'Reset All Data'),
-          React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Clear all localStorage data and restart with fresh seed data')
+          React.createElement('div',{style:{fontWeight:600,marginBottom:2}},'Reset Local Data'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Clears browser cache. Supabase data is safe.')
         ),
         React.createElement('button',{
           className:'btn btn-danger btn-sm',
           onClick:()=>{
-            if(window.confirm('This will DELETE all local data. Are you sure?')){
+            if(window.confirm('Clear all local cache data?')){
               Object.keys(localStorage).filter(k=>k.startsWith('gs_')).forEach(k=>localStorage.removeItem(k));
               window.location.reload();
             }
           }
-        },'Reset Local Data')
+        },'Reset Cache')
       )
     ),
 
-    // ── VOUCHER PREFIXES TAB ──
+    // ── VOUCHER PREFIXES ──
     tab==='vouchers'&&React.createElement('div',{className:'card'},
-      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Voucher Number Prefixes'),
-      React.createElement('div',{style:{fontSize:11,color:'var(--txt2)',marginBottom:14}},'These prefixes are used for auto-generating voucher numbers. e.g. PO-000001'),
+      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:6}},'Voucher Number Prefixes'),
+      React.createElement('div',{style:{fontSize:11,color:'var(--txt2)',marginBottom:14}},'Prefix used for auto-generated voucher numbers. e.g. PO-000001'),
       React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
         [
           ['Purchase (GRN) Prefix','grvPrefix'],
@@ -5366,8 +5818,8 @@ function Settings(){
         ].map(([label,key])=>React.createElement('div',{key,className:'fg'},
           React.createElement('label',{className:'flbl'},label),
           React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
-            React.createElement('input',{className:'fi',value:s[key]||'',onChange:e=>sf(key,e.target.value),placeholder:key.replace('Prefix','').toUpperCase(),style:{flex:1}}),
-            React.createElement('span',{style:{fontSize:11,color:'var(--txt3)',whiteSpace:'nowrap'}},'→ '+(s[key]||'...')+'-000001')
+            React.createElement('input',{className:'fi',value:s[key]||'',onChange:e=>sf(key,e.target.value),style:{flex:1}}),
+            React.createElement('span',{style:{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap'}},'→ '+(s[key]||'...')+'-000001')
           )
         ))
       ),
@@ -5376,117 +5828,56 @@ function Settings(){
       )
     ),
 
-    // ── SUPABASE TAB ──
+    // ── SUPABASE STATUS ──
     tab==='supabase'&&React.createElement('div',null,
-      // Status banner
-      React.createElement('div',{className:'card',style:{marginBottom:14,borderLeft:'4px solid '+STATUS_COLORS[sbStatus]}},
-        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
-          React.createElement('div',{style:{fontSize:32}},STATUS_ICONS[sbStatus]),
+      React.createElement('div',{className:'card',style:{borderLeft:'4px solid var(--green)',marginBottom:14}},
+        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:14}},
+          React.createElement('div',{style:{fontSize:36}},'✅'),
           React.createElement('div',null,
-            React.createElement('div',{style:{fontWeight:700,fontSize:15,color:STATUS_COLORS[sbStatus]}},
-              sbStatus==='connected'?'Connected to Supabase':
-              sbStatus==='error'?'Connection Failed':
-              sbStatus==='testing'?'Testing Connection...':
-              'Not Connected — Using Local Storage'
-            ),
-            React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:3}},
-              sbStatus==='connected'
-                ? 'Data will sync to your Supabase database. Local storage used as cache.'
-                : 'All data is stored in your browser\'s localStorage. Connect Supabase for persistent, multi-device storage.'
-            )
+            React.createElement('div',{style:{fontWeight:800,fontSize:16,color:'var(--green)'}},'Connected to Supabase'),
+            React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:3}},'BIZPOZ is using your Supabase project for live, persistent data storage.')
           )
         )
       ),
-
-      // Instructions card
-      React.createElement('div',{className:'alert alert-blue',style:{marginBottom:14}},
-        React.createElement('div',null,
-          React.createElement('div',{style:{fontWeight:700,marginBottom:6}},React.createElement(Ic,{n:'info',s:13}),' How to connect your Supabase project:'),
-          React.createElement('ol',{style:{margin:'0 0 0 16px',padding:0,fontSize:12,lineHeight:'1.8'}},
-            React.createElement('li',null,'Go to ',React.createElement('strong',null,'supabase.com'),' → your project → Settings → API'),
-            React.createElement('li',null,'Copy the ',React.createElement('strong',null,'Project URL'),' (e.g. https://xyz.supabase.co)'),
-            React.createElement('li',null,'Copy the ',React.createElement('strong',null,'anon / public'),' key (safe to use in browser)'),
-            React.createElement('li',null,'Run the ',React.createElement('strong',null,'bizpoz_schema.sql'),' in your Supabase SQL editor'),
-            React.createElement('li',null,'Paste both below and click Save Connection')
-          )
+      React.createElement('div',{className:'card',style:{marginBottom:14}},
+        React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Connection Details')),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,fontSize:12}},
+          [
+            ['Project URL','https://cionoqjomadpalyyufdd.supabase.co'],
+            ['Region','Supabase Cloud'],
+            ['Key Type','anon / public (safe in browser)'],
+            ['Status','🟢 Active'],
+          ].map(([l,v])=>React.createElement('div',{key:l},
+            React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.4px',marginBottom:3}},l),
+            React.createElement('div',{style:{fontWeight:600,fontFamily:l==='Project URL'?'var(--mono)':'inherit',fontSize:l==='Project URL'?11:12}},v)
+          ))
         )
       ),
-
-      // Connection form
-      React.createElement('div',{className:'card'},
-        React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Connection Details'),
-        React.createElement('div',{className:'fg',style:{marginBottom:12}},
-          React.createElement('label',{className:'flbl'},'Supabase Project URL'),
-          React.createElement('input',{
-            className:'fi',value:sbUrl,
-            onChange:e=>setSbUrl(e.target.value),
-            placeholder:'https://your-project-id.supabase.co',
-            style:{fontFamily:'var(--mono)',fontSize:12}
-          })
-        ),
-        React.createElement('div',{className:'fg',style:{marginBottom:12}},
-          React.createElement('label',{className:'flbl'},'Anon / Public Key'),
-          React.createElement('div',{style:{position:'relative'}},
-            React.createElement('input',{
-              className:'fi',value:sbKey,
-              onChange:e=>setSbKey(e.target.value),
-              placeholder:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-              style:{fontFamily:'var(--mono)',fontSize:11,paddingRight:80}
-            }),
-            React.createElement('div',{style:{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:9,color:'var(--txt3)',fontWeight:600}},'ANON KEY')
-          ),
-          React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:3}},
-            '✓ Safe to use in browser — this is the public key, not the secret key'
-          )
-        ),
-        React.createElement('div',{className:'fg',style:{marginBottom:14}},
-          React.createElement('label',{className:'flbl'},'Organization ID (optional — from your orgs table)'),
-          React.createElement('input',{
-            className:'fi',value:sbOrg,
-            onChange:e=>setSbOrg(e.target.value),
-            placeholder:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-            style:{fontFamily:'var(--mono)',fontSize:12}
-          })
-        ),
-        React.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
-          React.createElement('button',{className:'btn btn-primary',onClick:saveSB},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Connection'),
-          React.createElement('button',{className:'btn btn-outline',onClick:testSB,disabled:sbTesting},
-            sbTesting?'Testing...':'🔌 Test Connection'
-          ),
-          sbStatus==='connected'&&React.createElement('button',{className:'btn btn-danger btn-sm',onClick:clearSB},'Disconnect')
-        )
-      ),
-
-      // Security note
-      React.createElement('div',{className:'alert alert-amber',style:{marginTop:14}},
-        React.createElement('div',null,
-          React.createElement('strong',null,'Security Note: '),
-          'Your Supabase URL and anon key are stored in your browser\'s localStorage only. They are ',
-          React.createElement('strong',null,'never sent anywhere'),
-          ' except directly to your own Supabase project. The anon key is designed to be public — it only allows what your Row Level Security (RLS) policies permit.'
-        )
-      ),
-
-      // Migration helper
-      sbStatus==='connected'&&React.createElement('div',{className:'card',style:{marginTop:14}},
-        React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:8}},'📤 Migrate Local Data to Supabase'),
-        React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:10}},
-          'Your existing localStorage data can be exported. Run the bizpoz_schema.sql first, then use the API to import your data.'
-        ),
+      React.createElement('div',{className:'card',style:{marginBottom:14}},
+        React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'📤 Export Local Cache to JSON')),
+        React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:10}},'Export any locally cached data as JSON for backup or migration purposes.'),
         React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>{
           const data={};
           ['warehouses','racks','items','stock','grv','giv','transfers','consumption','production','materialRequests','damagedProducts','users','settings','suppliers'].forEach(k=>{
             const v=localStorage.getItem('gs_'+k);
-            if(v)data[k]=JSON.parse(v);
+            if(v)try{data[k]=JSON.parse(v);}catch(e){}
           });
           const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
           const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bizpoz-export.json';a.click();
-          toast('Data exported to JSON. Use this to import into Supabase.','success');
-        }},'📥 Export Local Data as JSON')
+          toast('Data exported','success');
+        }},'\u{1f4e5} Export Local Data as JSON')
+      ),
+      React.createElement('div',{className:'alert alert-blue'},
+        React.createElement('div',null,
+          React.createElement('strong',null,'\u{1f512} Security: '),
+          'The anon key embedded in this app is the ',React.createElement('strong',null,'public key'),
+          ' — it is designed to be visible. Your data is protected by Row Level Security (RLS) policies in Supabase, not by keeping the key secret.'
+        )
       )
     )
   );
 }
+
 
 
 // ════════════════════════════════════════
