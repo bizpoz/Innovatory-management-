@@ -345,11 +345,67 @@ const {useState,useEffect,useContext,createContext,useRef,useCallback,useMemo} =
 //  DATA LAYER
 // ════════════════════════════════════════
 const DB='gs_';
+// ════════════════════════════════════════
+//  SUPABASE CONFIGURATION
+//  Users enter their own URL + anon key in Settings → Supabase tab.
+//  No API key is hardcoded here.
+// ════════════════════════════════════════
+
+const SB_URL_KEY  = 'bizpoz_sb_url';
+const SB_KEY_KEY  = 'bizpoz_sb_anonkey';
+const SB_ORG_KEY  = 'bizpoz_sb_orgid';
+
+// Get Supabase config from localStorage (user-entered, never shipped in source)
+const getSBConfig = () => ({
+  url:    localStorage.getItem(SB_URL_KEY)  || '',
+  key:    localStorage.getItem(SB_KEY_KEY)  || '',
+  org_id: localStorage.getItem(SB_ORG_KEY) || '',
+});
+
+const isSBConnected = () => {
+  const {url, key} = getSBConfig();
+  return !!(url && key);
+};
+
+// ── Supabase REST helper (no SDK needed — plain fetch) ──
+const sbFetch = async (path, opts={}) => {
+  const {url, key} = getSBConfig();
+  if (!url || !key) throw new Error('Supabase not configured');
+  const res = await fetch(`${url}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':         key,
+      'Authorization': `Bearer ${key}`,
+      'Prefer':        opts.prefer || 'return=representation',
+      ...(opts.headers||{}),
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({message:res.statusText}));
+    throw new Error(err.message || res.statusText);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+};
+
+// Helper: build Supabase query string
+const sbQ = (params={}) => {
+  const parts = [];
+  if (params.select)  parts.push('select='+params.select);
+  if (params.eq)      Object.entries(params.eq).forEach(([k,v])=>parts.push(k+'=eq.'+encodeURIComponent(v)));
+  if (params.order)   parts.push('order='+params.order);
+  if (params.limit)   parts.push('limit='+params.limit);
+  return parts.length ? '?'+parts.join('&') : '';
+};
+
+// ── localStorage db (fallback / local mode) ──
 const db={
   g:(k)=>{try{return JSON.parse(localStorage.getItem(DB+k)||'null')}catch{return null}},
   s:(k,v)=>localStorage.setItem(DB+k,JSON.stringify(v)),
   d:(k)=>localStorage.removeItem(DB+k),
 };
+
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const ts=()=>new Date().toISOString();
 const today=()=>new Date().toISOString().split('T')[0];
@@ -5196,53 +5252,242 @@ function Settings(){
   const {toast}=useCtx();
   const [s,setS]=useState(settSvc.get());
   const sf=(k,v)=>setS(p=>({...p,[k]:v}));
+  const [tab,setTab]=useState('general');
+
+  // Supabase connection state
+  const [sbUrl,setSbUrl]=useState(localStorage.getItem('bizpoz_sb_url')||'');
+  const [sbKey,setSbKey]=useState(localStorage.getItem('bizpoz_sb_anonkey')||'');
+  const [sbOrg,setSbOrg]=useState(localStorage.getItem('bizpoz_sb_orgid')||'');
+  const [sbTesting,setSbTesting]=useState(false);
+  const [sbStatus,setSbStatus]=useState(isSBConnected()?'connected':'disconnected');
+
   const save=()=>{settSvc.update(s);toast('Settings saved','success');};
+
+  const saveSB=()=>{
+    if(!sbUrl||!sbKey){toast('Enter both URL and Anon Key','error');return;}
+    localStorage.setItem('bizpoz_sb_url',sbUrl.trim().replace(/\/$/,''));
+    localStorage.setItem('bizpoz_sb_anonkey',sbKey.trim());
+    if(sbOrg)localStorage.setItem('bizpoz_sb_orgid',sbOrg.trim());
+    setSbStatus('connected');
+    toast('Supabase connection saved!','success');
+  };
+
+  const testSB=async()=>{
+    if(!sbUrl||!sbKey){toast('Enter URL and key first','error');return;}
+    setSbTesting(true);setSbStatus('testing');
+    try{
+      const url=sbUrl.trim().replace(/\/$/,'');
+      const res=await fetch(url+'/rest/v1/',{
+        headers:{'apikey':sbKey.trim(),'Authorization':'Bearer '+sbKey.trim()}
+      });
+      if(res.ok||res.status===200||res.status===404){
+        setSbStatus('connected');
+        toast('Connection successful! Supabase is reachable.','success');
+      } else {
+        setSbStatus('error');
+        toast('Connection failed: HTTP '+res.status,'error');
+      }
+    }catch(e){
+      setSbStatus('error');
+      toast('Connection failed: '+e.message,'error');
+    }finally{setSbTesting(false);}
+  };
+
+  const clearSB=()=>{
+    ['bizpoz_sb_url','bizpoz_sb_anonkey','bizpoz_sb_orgid'].forEach(k=>localStorage.removeItem(k));
+    setSbUrl('');setSbKey('');setSbOrg('');setSbStatus('disconnected');
+    toast('Supabase connection cleared. Using local storage.','success');
+  };
+
+  const STATUS_COLORS={connected:'var(--green)',disconnected:'var(--txt3)',error:'var(--red)',testing:'var(--amber)'};
+  const STATUS_ICONS={connected:'✅',disconnected:'⚫',error:'❌',testing:'⏳'};
 
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Settings'),React.createElement('p',null,'System configuration')),
-      React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Settings'))
+      React.createElement('div',{className:'ph-r'},
+        tab==='general'&&React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Settings')
+      )
     ),
-    React.createElement('div',{className:'grid g2'},
-      React.createElement('div',null,
-        React.createElement('div',{className:'card',style:{marginBottom:14}},
-          React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Company / Store Info')),
-          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Store / Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
-          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Sub Title'),React.createElement('input',{className:'fi',value:s.subtitle||'',onChange:e=>sf('subtitle',e.target.value)})),
-          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Address'),React.createElement('textarea',{className:'fi',rows:2,value:s.address||'',onChange:e=>sf('address',e.target.value)})),
-          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Contact / Phone'),React.createElement('input',{className:'fi',value:s.contact||'',onChange:e=>sf('contact',e.target.value)}))
+    // Tab bar
+    React.createElement('div',{className:'tabs',style:{marginBottom:16}},
+      React.createElement('div',{className:'tab'+(tab==='general'?' on':''),onClick:()=>setTab('general')},'⚙️ General'),
+      React.createElement('div',{className:'tab'+(tab==='vouchers'?' on':''),onClick:()=>setTab('vouchers')},'📋 Voucher Prefixes'),
+      React.createElement('div',{
+        className:'tab'+(tab==='supabase'?' on':''),
+        onClick:()=>setTab('supabase'),
+        style:{display:'flex',alignItems:'center',gap:6}
+      },
+        React.createElement('span',null,STATUS_ICONS[sbStatus]),
+        'Supabase Database',
+        sbStatus==='connected'&&React.createElement('span',{style:{background:'var(--green)',color:'#fff',fontSize:9,fontWeight:700,padding:'1px 6px',borderRadius:20,marginLeft:4}},'LIVE')
+      )
+    ),
+
+    // ── GENERAL TAB ──
+    tab==='general'&&React.createElement('div',{className:'card'},
+      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Company Information'),
+      React.createElement('div',{className:'frow3'},
+        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
+        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Currency Symbol'),React.createElement('input',{className:'fi',value:s.currencySymbol||'',onChange:e=>sf('currencySymbol',e.target.value),placeholder:'QR'})),
+        React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+      ),
+      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',margin:'16px 0 12px'}},'Danger Zone'),
+      React.createElement('div',{className:'alert alert-red',style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
+        React.createElement('div',null,
+          React.createElement('div',{style:{fontWeight:600,marginBottom:2}},'Reset All Data'),
+          React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Clear all localStorage data and restart with fresh seed data')
         ),
-        React.createElement('div',{className:'card'},
-          React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Currency & Fiscal Year')),
-          React.createElement('div',{className:'frow'},
-            React.createElement('div',{className:'fg'},
-              React.createElement('label',{className:'flbl'},'Currency Symbol'),
-              React.createElement('select',{className:'fi',value:s.currencySymbol||'QR',onChange:e=>sf('currencySymbol',e.target.value)},
-                ['QR','AED','SAR','$','€','£','₹'].map(c=>React.createElement('option',{key:c,value:c},c==='QR'?'QR — Qatar Riyal':c==='AED'?'AED — UAE Dirham':c==='SAR'?'SAR — Saudi Riyal':c))
-              )
+        React.createElement('button',{
+          className:'btn btn-danger btn-sm',
+          onClick:()=>{
+            if(window.confirm('This will DELETE all local data. Are you sure?')){
+              Object.keys(localStorage).filter(k=>k.startsWith('gs_')).forEach(k=>localStorage.removeItem(k));
+              window.location.reload();
+            }
+          }
+        },'Reset Local Data')
+      )
+    ),
+
+    // ── VOUCHER PREFIXES TAB ──
+    tab==='vouchers'&&React.createElement('div',{className:'card'},
+      React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Voucher Number Prefixes'),
+      React.createElement('div',{style:{fontSize:11,color:'var(--txt2)',marginBottom:14}},'These prefixes are used for auto-generating voucher numbers. e.g. PO-000001'),
+      React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+        [
+          ['Purchase (GRN) Prefix','grvPrefix'],
+          ['GIN (Issue Note) Prefix','givPrefix'],
+          ['Transfer Prefix','trnPrefix'],
+          ['Consumption Prefix','conPrefix'],
+          ['Production Prefix','proPrefix'],
+          ['Material Request Prefix','mrPrefix'],
+          ['Damaged Products Prefix','dmgPrefix'],
+        ].map(([label,key])=>React.createElement('div',{key,className:'fg'},
+          React.createElement('label',{className:'flbl'},label),
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+            React.createElement('input',{className:'fi',value:s[key]||'',onChange:e=>sf(key,e.target.value),placeholder:key.replace('Prefix','').toUpperCase(),style:{flex:1}}),
+            React.createElement('span',{style:{fontSize:11,color:'var(--txt3)',whiteSpace:'nowrap'}},'→ '+(s[key]||'...')+'-000001')
+          )
+        ))
+      ),
+      React.createElement('div',{style:{marginTop:14,display:'flex',justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Prefixes')
+      )
+    ),
+
+    // ── SUPABASE TAB ──
+    tab==='supabase'&&React.createElement('div',null,
+      // Status banner
+      React.createElement('div',{className:'card',style:{marginBottom:14,borderLeft:'4px solid '+STATUS_COLORS[sbStatus]}},
+        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
+          React.createElement('div',{style:{fontSize:32}},STATUS_ICONS[sbStatus]),
+          React.createElement('div',null,
+            React.createElement('div',{style:{fontWeight:700,fontSize:15,color:STATUS_COLORS[sbStatus]}},
+              sbStatus==='connected'?'Connected to Supabase':
+              sbStatus==='error'?'Connection Failed':
+              sbStatus==='testing'?'Testing Connection...':
+              'Not Connected — Using Local Storage'
             ),
-            React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+            React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:3}},
+              sbStatus==='connected'
+                ? 'Data will sync to your Supabase database. Local storage used as cache.'
+                : 'All data is stored in your browser\'s localStorage. Connect Supabase for persistent, multi-device storage.'
+            )
           )
         )
       ),
-      React.createElement('div',null,
-        React.createElement('div',{className:'card',style:{marginBottom:14}},
-          React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Voucher Numbering')),
-          React.createElement('div',{className:'frow'},
-            React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Purchase (GRN) Prefix'),React.createElement('input',{className:'fi',value:s.grvPrefix||'GRN',onChange:e=>sf('grvPrefix',e.target.value),placeholder:'GRV'})),
-            React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'GIN Prefix'),React.createElement('input',{className:'fi',value:s.givPrefix||'GIN',onChange:e=>sf('givPrefix',e.target.value),placeholder:'GIV'}))
-          ),
-          React.createElement('div',{className:'alert alert-blue',style:{marginTop:4}},React.createElement(Ic,{n:'info',s:12}),'Voucher numbers are auto-generated using the prefix followed by a 6-digit sequence (e.g., GRV-000001)')
-        ),
-        React.createElement('div',{className:'card',style:{marginBottom:14}},
-          React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Data Management')),
-          React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:12}},'Reset all data to factory defaults. This cannot be undone.'),
-          React.createElement('button',{className:'btn btn-danger',onClick:()=>{if(confirm('Reset all data? This cannot be undone.')){localStorage.clear();window.location.reload();}}},React.createElement(Ic,{n:'alert',s:12}),' Reset All Data')
+
+      // Instructions card
+      React.createElement('div',{className:'alert alert-blue',style:{marginBottom:14}},
+        React.createElement('div',null,
+          React.createElement('div',{style:{fontWeight:700,marginBottom:6}},React.createElement(Ic,{n:'info',s:13}),' How to connect your Supabase project:'),
+          React.createElement('ol',{style:{margin:'0 0 0 16px',padding:0,fontSize:12,lineHeight:'1.8'}},
+            React.createElement('li',null,'Go to ',React.createElement('strong',null,'supabase.com'),' → your project → Settings → API'),
+            React.createElement('li',null,'Copy the ',React.createElement('strong',null,'Project URL'),' (e.g. https://xyz.supabase.co)'),
+            React.createElement('li',null,'Copy the ',React.createElement('strong',null,'anon / public'),' key (safe to use in browser)'),
+            React.createElement('li',null,'Run the ',React.createElement('strong',null,'bizpoz_schema.sql'),' in your Supabase SQL editor'),
+            React.createElement('li',null,'Paste both below and click Save Connection')
+          )
         )
+      ),
+
+      // Connection form
+      React.createElement('div',{className:'card'},
+        React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:14}},'Connection Details'),
+        React.createElement('div',{className:'fg',style:{marginBottom:12}},
+          React.createElement('label',{className:'flbl'},'Supabase Project URL'),
+          React.createElement('input',{
+            className:'fi',value:sbUrl,
+            onChange:e=>setSbUrl(e.target.value),
+            placeholder:'https://your-project-id.supabase.co',
+            style:{fontFamily:'var(--mono)',fontSize:12}
+          })
+        ),
+        React.createElement('div',{className:'fg',style:{marginBottom:12}},
+          React.createElement('label',{className:'flbl'},'Anon / Public Key'),
+          React.createElement('div',{style:{position:'relative'}},
+            React.createElement('input',{
+              className:'fi',value:sbKey,
+              onChange:e=>setSbKey(e.target.value),
+              placeholder:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              style:{fontFamily:'var(--mono)',fontSize:11,paddingRight:80}
+            }),
+            React.createElement('div',{style:{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:9,color:'var(--txt3)',fontWeight:600}},'ANON KEY')
+          ),
+          React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:3}},
+            '✓ Safe to use in browser — this is the public key, not the secret key'
+          )
+        ),
+        React.createElement('div',{className:'fg',style:{marginBottom:14}},
+          React.createElement('label',{className:'flbl'},'Organization ID (optional — from your orgs table)'),
+          React.createElement('input',{
+            className:'fi',value:sbOrg,
+            onChange:e=>setSbOrg(e.target.value),
+            placeholder:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+            style:{fontFamily:'var(--mono)',fontSize:12}
+          })
+        ),
+        React.createElement('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+          React.createElement('button',{className:'btn btn-primary',onClick:saveSB},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save Connection'),
+          React.createElement('button',{className:'btn btn-outline',onClick:testSB,disabled:sbTesting},
+            sbTesting?'Testing...':'🔌 Test Connection'
+          ),
+          sbStatus==='connected'&&React.createElement('button',{className:'btn btn-danger btn-sm',onClick:clearSB},'Disconnect')
+        )
+      ),
+
+      // Security note
+      React.createElement('div',{className:'alert alert-amber',style:{marginTop:14}},
+        React.createElement('div',null,
+          React.createElement('strong',null,'Security Note: '),
+          'Your Supabase URL and anon key are stored in your browser\'s localStorage only. They are ',
+          React.createElement('strong',null,'never sent anywhere'),
+          ' except directly to your own Supabase project. The anon key is designed to be public — it only allows what your Row Level Security (RLS) policies permit.'
+        )
+      ),
+
+      // Migration helper
+      sbStatus==='connected'&&React.createElement('div',{className:'card',style:{marginTop:14}},
+        React.createElement('div',{style:{fontWeight:700,fontSize:13,color:'var(--navy)',marginBottom:8}},'📤 Migrate Local Data to Supabase'),
+        React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:10}},
+          'Your existing localStorage data can be exported. Run the bizpoz_schema.sql first, then use the API to import your data.'
+        ),
+        React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>{
+          const data={};
+          ['warehouses','racks','items','stock','grv','giv','transfers','consumption','production','materialRequests','damagedProducts','users','settings','suppliers'].forEach(k=>{
+            const v=localStorage.getItem('gs_'+k);
+            if(v)data[k]=JSON.parse(v);
+          });
+          const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+          const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bizpoz-export.json';a.click();
+          toast('Data exported to JSON. Use this to import into Supabase.','success');
+        }},'📥 Export Local Data as JSON')
       )
     )
   );
 }
+
 
 // ════════════════════════════════════════
 //  MAIN APP
