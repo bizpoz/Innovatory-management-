@@ -2086,10 +2086,21 @@ function Items(){
   const [q,setQ]=useState('');
   const [catF,setCatF]=useState('');
   const [whF,setWhF]=useState(whId||'');
-  const [detail,setDetail]=useState(null); // clicked item detail
+  const [assetF,setAssetF]=useState(''); // '' | 'asset' | 'non-asset'
+  const [detail,setDetail]=useState(null);
   const racks=rackSvc.getAll(whF||null);
   const sym=settSvc.get().currencySymbol||'QR';
   const reloadItems=()=>{setItems(itemSvc.getAll(whF||null));reload();};
+
+  const filtered=useMemo(()=>items.filter(i=>{
+    const mq=i.name.toLowerCase().includes(q.toLowerCase())||
+              (i.code||'').toLowerCase().includes(q.toLowerCase())||
+              (i.assetCode||'').toLowerCase().includes(q.toLowerCase());
+    const mc=!catF||i.category===catF;
+    const mw=!whF||i.whId===whF;
+    const ma=!assetF||(assetF==='asset'?!!i.isAsset:!i.isAsset);
+    return mq&&mc&&mw&&ma;
+  }),[items,q,catF,whF,assetF]);
 
   // Export to CSV
   const exportCSV=(rows)=>{
@@ -2115,13 +2126,6 @@ function Items(){
     if(!assets.length){toast('No assets to print. Filter by Assets first.','warning');return;}
     setModal(React.createElement(AssetLabelPrinter,{assets,onClose:()=>setModal(null)}));
   };
-
-  const filtered=useMemo(()=>items.filter(i=>{
-    const mq=i.name.toLowerCase().includes(q.toLowerCase())||i.code.toLowerCase().includes(q.toLowerCase());
-    const mc=!catF||i.category===catF;
-    const mw=!whF||i.whId===whF;
-    return mq&&mc&&mw;
-  }),[items,q,catF,whF]);
 
   // ── DETAIL VIEW ──
   if(detail){
