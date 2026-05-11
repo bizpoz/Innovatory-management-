@@ -1437,13 +1437,7 @@ function Auth(){
   const [pw,setPw]=useState('admin123');
   const [err,setErr]=useState('');
   const [loading,setLoading]=useState(false);
-  const demos=[
-    {label:'Super Admin',sub:'All warehouses',un:'admin',pw:'admin123'},
-    {label:'WH1 Manager',sub:'Main WH — Can approve',un:'mgr1',pw:'mgr123'},
-    {label:'WH1 Store',sub:'Main WH — Submit only',un:'store1',pw:'store123'},
-    {label:'WH2 Manager',sub:'Secondary WH — Can approve',un:'mgr2',pw:'mgr456'},
-    {label:'WH2 Store',sub:'Secondary WH — Submit only',un:'store2',pw:'store456'},
-  ];
+  
   const go=async()=>{
     setLoading(true);setErr('');
     await new Promise(r=>setTimeout(r,350));
@@ -1454,7 +1448,7 @@ function Auth(){
   return React.createElement('div',{className:'auth'},
     React.createElement('div',{className:'auth-left'},
       React.createElement('div',{className:'auth-brand'},
-        React.createElement('div',{className:'auth-brand-icon'},'🏪'),
+        React.createElement('img',{src:BIZPOZ_LOGO,alt:'BIZPOZ',style:{width:80,height:80,borderRadius:16,marginBottom:12,boxShadow:'0 4px 24px rgba(0,0,0,.3)'}}),
         React.createElement('div',{className:'auth-brand-name'},sett.companyName||'BIZPOZ'),
         React.createElement('div',{className:'auth-brand-sub'},'Multi-Warehouse IMS')
       ),
@@ -1467,14 +1461,8 @@ function Auth(){
     React.createElement('div',{className:'auth-right'},
       React.createElement('div',{className:'auth-box'},
         React.createElement('div',{className:'auth-h'},'Sign In'),
-        React.createElement('div',{className:'auth-sub'},'Select your warehouse account to continue'),
-        React.createElement('div',{className:'demo-box'},
-          React.createElement('div',{className:'demo-lbl'},'Quick Access'),
-          demos.map(d=>React.createElement('div',{key:d.un,className:'demo-row',onClick:()=>{setUn(d.un);setPw(d.pw);}},
-            React.createElement('span',{className:'demo-row-l'},d.label,' · ',React.createElement('span',{style:{fontWeight:400,color:'var(--txt3)',fontSize:11}},d.sub)),
-            React.createElement('span',{className:'demo-row-r'},d.un)
-          ))
-        ),
+        React.createElement('div',{className:'auth-sub'},'Sign in to BIZPOZ Inventory Management'),
+
         err&&React.createElement('div',{className:'alert alert-red',style:{marginBottom:14}},React.createElement(Ic,{n:'alert',s:13}),err),
         React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Username'),React.createElement('input',{className:'fi',value:un,onChange:e=>setUn(e.target.value),placeholder:'Enter username'})),
         React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Password'),React.createElement('input',{className:'fi',type:'password',value:pw,onChange:e=>setPw(e.target.value),onKeyDown:e=>e.key==='Enter'&&go()})),
@@ -2595,7 +2583,7 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
     reader.readAsDataURL(file);
   };
 
-  return React.createElement('div',null,
+  return React.createElement(Modal,{title:initial?'Edit Item':'Add New Item',onClose,size:'lg'},
     // Photo + basic info row
     React.createElement('div',{style:{display:'flex',gap:16,marginBottom:14,alignItems:'flex-start'}},
       // Photo
