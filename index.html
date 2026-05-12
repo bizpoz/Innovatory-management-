@@ -2778,33 +2778,30 @@ function StockTransfer(){
 //  CATEGORY MASTER
 // ════════════════════════════════════════
 function Categories(){
-  const {toast,setModal,whId,isSA,reload}=useCtx();
+  const {toast,setModal,isSA,reload}=useCtx();
   const [cats,setCats]=useState(catSvc.getAll());
-  const items=itemSvc.getAll(whId);
-  const sett=settSvc.get();
-  const sym=sett.currencySymbol||'QR';
-
   const reloadCats=()=>{refreshCATS();setCats(catSvc.getAll());reload();};
 
-  // Preset icon/color options for the form
-  const ICONS=['📦','⚙️','⚡','📡','🛡️','🔧','🏭','🔬','💡','🪛','🔩','🏗️','🧪','🚿','🔋','📋','🗜️','🪝','💎','🏆'];
+  const ICONS=['📦','⚙️','⚡','📡','🛡️','🔧','🏭','🔬','💡','🪛','🔩','🏗️','🧪','🔋','📋','🗜️','🪝','💎','🔌','🧲'];
   const COLORS=[
-    {color:'#2563eb',bg:'#eff6ff',label:'Blue'},
-    {color:'#d97706',bg:'#fffbeb',label:'Amber'},
-    {color:'#7c3aed',bg:'#f5f3ff',label:'Purple'},
-    {color:'#16a34a',bg:'#f0fdf4',label:'Green'},
-    {color:'#0891b2',bg:'#ecfeff',label:'Teal'},
-    {color:'#dc2626',bg:'#fef2f2',label:'Red'},
-    {color:'#ea580c',bg:'#fff7ed',label:'Orange'},
-    {color:'#0284c7',bg:'#f0f9ff',label:'Sky'},
-    {color:'#9333ea',bg:'#faf5ff',label:'Violet'},
-    {color:'#059669',bg:'#ecfdf5',label:'Emerald'},
+    {color:'#2563eb',bg:'#eff6ff'},{color:'#d97706',bg:'#fffbeb'},
+    {color:'#7c3aed',bg:'#f5f3ff'},{color:'#16a34a',bg:'#f0fdf4'},
+    {color:'#0891b2',bg:'#ecfeff'},{color:'#dc2626',bg:'#fef2f2'},
+    {color:'#ea580c',bg:'#fff7ed'},{color:'#0284c7',bg:'#f0f9ff'},
+    {color:'#9333ea',bg:'#faf5ff'},{color:'#059669',bg:'#ecfdf5'},
   ];
 
-  const CatForm=({initial,onSave,onClose})=>{
-    const [f,setF]=useState(initial||{id:'',name:'',short:'',icon:'📦',color:'#2563eb',bg:'#eff6ff',parentId:null});
-    const allCats=catSvc.getAll();
-    const s2=(k,v)=>setF(p=>({...p,[k]:v}));
+  // ── Shared CatForm — used for both category and sub-category ──
+  const CatForm=({initial,parentCat,onSave,onClose})=>{
+    const isSubCat=!!parentCat;
+    const [f,setF]=useState(initial||{
+      id:'', name:'', short:'',
+      icon: parentCat?.icon||'📦',
+      color: parentCat?.color||'#2563eb',
+      bg:    parentCat?.bg||'#eff6ff',
+      parentId: parentCat?.id||null,
+    });
+    const sf=(k,v)=>setF(p=>({...p,[k]:v}));
     const [err,setErr]=useState({});
 
     const save=()=>{
@@ -2813,183 +2810,188 @@ function Categories(){
       if(!f.id&&!initial)e.id='Required';
       if(!f.short)e.short='Required';
       if(Object.keys(e).length){setErr(e);return;}
-      try{ onSave(f); }
-      catch(ex){ setErr({id:ex.message}); }
+      try{onSave(f);}catch(ex){setErr({id:ex.message});}
     };
 
-    return React.createElement(Modal,{title:initial?'Edit Category':'Add New Category',onClose,size:'sm'},
-      // Preview badge
-      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:f.bg,borderRadius:'var(--r)',border:'2px solid '+f.color,marginBottom:14}},
-        React.createElement('div',{style:{fontSize:28}},f.icon),
+    const title=initial
+      ? (isSubCat?'Edit Sub-Category':'Edit Category')
+      : (isSubCat?'Add Sub-Category to: '+parentCat.name:'Add New Category');
+
+    return React.createElement(Modal,{title,onClose,size:'sm'},
+      // Preview
+      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:f.bg,borderRadius:'var(--r)',border:'2px solid '+f.color,marginBottom:14}},
+        React.createElement('div',{style:{fontSize:24}},f.icon),
         React.createElement('div',null,
-          React.createElement('div',{style:{fontWeight:700,fontSize:15,color:f.color}},f.name||'Category Name'),
-          React.createElement('div',{style:{fontSize:11,color:f.color,opacity:.7}},f.short||'Short')
+          React.createElement('div',{style:{fontWeight:700,color:f.color,fontSize:13}},f.name||'Preview'),
+          isSubCat&&parentCat&&React.createElement('div',{style:{fontSize:10,color:f.color,opacity:.7}},parentCat.icon+' '+parentCat.name+' › '+f.short)
         )
       ),
+      // Code + Name row
       React.createElement('div',{className:'frow'},
         React.createElement('div',{className:'fg'},
-          React.createElement('label',{className:'flbl'},'Category Code '+(initial?'(ID — changing affects all items)':'* (e.g. MECH, ELEC)')),
+          React.createElement('label',{className:'flbl'},'Code *'+(initial?' (⚠️ changes update all items)':' (e.g. MECH)')),
           React.createElement('input',{
-            className:'fi',
-            value:f.id,
-            onChange:ev=>s2('id',ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)),
-            placeholder:'e.g. MECH',
+            className:'fi',value:f.id,
+            onChange:ev=>sf('id',ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8)),
+            placeholder:isSubCat?'e.g. BEAR, PUMP':'e.g. MECH',
             style:{fontFamily:'var(--mono)',fontWeight:700,letterSpacing:'1px',borderColor:initial?'var(--amber)':''}
           }),
-          initial&&React.createElement('div',{style:{fontSize:10,color:'var(--amber)',marginTop:3}},'⚠️ Changing the code will update all items using this category'),
           err.id&&React.createElement('div',{className:'fe'},err.id)
         ),
         React.createElement('div',{className:'fg'},
           React.createElement('label',{className:'flbl'},'Full Name *'),
-          React.createElement('input',{className:'fi',value:f.name,onChange:ev=>s2('name',ev.target.value)}),
+          React.createElement('input',{className:'fi',value:f.name,onChange:ev=>sf('name',ev.target.value),autoFocus:true}),
           err.name&&React.createElement('div',{className:'fe'},err.name)
         )
       ),
-      React.createElement('div',{className:'fg'},
-        React.createElement('label',{className:'flbl'},'Short Name / Badge Label *'),
-        React.createElement('input',{className:'fi',value:f.short,onChange:ev=>s2('short',ev.target.value),placeholder:'e.g. Mechanical, Electrical'}),
+      React.createElement('div',{className:'fg',style:{marginBottom:10}},
+        React.createElement('label',{className:'flbl'},'Badge / Short Name *'),
+        React.createElement('input',{className:'fi',value:f.short,onChange:ev=>sf('short',ev.target.value),placeholder:'Shown as badge label'}),
         err.short&&React.createElement('div',{className:'fe'},err.short)
       ),
-      React.createElement('div',{className:'fg'},
-        React.createElement('label',{className:'flbl'},'Parent Category (leave empty for top-level)'),
-        React.createElement('select',{className:'fi',value:f.parentId||'',onChange:ev=>s2('parentId',ev.target.value||null)},
-          React.createElement('option',{value:''},'— No Parent (Top-Level Category) —'),
-          allCats.filter(cat=>cat.id!==(initial?.id||'')).map(cat=>React.createElement('option',{key:cat.id,value:cat.id},cat.icon+' '+cat.name))
-        )
-      ),
       // Icon picker
-      React.createElement('div',{className:'fg'},
+      React.createElement('div',{className:'fg',style:{marginBottom:10}},
         React.createElement('label',{className:'flbl'},'Icon'),
-        React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
-          ICONS.map(ico=>React.createElement('div',{
-            key:ico,
-            onClick:()=>s2('icon',ico),
-            style:{width:36,height:36,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,cursor:'pointer',background:f.icon===ico?f.color+'22':'var(--off2)',border:'2px solid '+(f.icon===ico?f.color:'transparent'),transition:'all .1s'}
-          },ico))
+        React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},
+          ICONS.map(ico=>React.createElement('div',{key:ico,onClick:()=>sf('icon',ico),
+            style:{width:34,height:34,borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:18,cursor:'pointer',
+              background:f.icon===ico?f.color+'22':'var(--off2)',
+              border:'2px solid '+(f.icon===ico?f.color:'transparent')}}
+          ,ico))
         )
       ),
       // Color picker
       React.createElement('div',{className:'fg'},
-        React.createElement('label',{className:'flbl'},'Color Theme'),
+        React.createElement('label',{className:'flbl'},'Color'),
         React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
-          COLORS.map(col=>React.createElement('div',{
-            key:col.color,
-            onClick:()=>{s2('color',col.color);s2('bg',col.bg);},
-            title:col.label,
-            style:{width:32,height:32,borderRadius:'50%',background:col.color,cursor:'pointer',border:f.color===col.color?'3px solid #000':'3px solid transparent',boxShadow:f.color===col.color?'0 0 0 2px #fff inset':'none',transition:'all .1s'}
-          }))
+          COLORS.map(col=>React.createElement('div',{key:col.color,onClick:()=>{sf('color',col.color);sf('bg',col.bg);},
+            style:{width:28,height:28,borderRadius:'50%',background:col.color,cursor:'pointer',
+              border:f.color===col.color?'3px solid #000':'3px solid transparent',
+              boxShadow:f.color===col.color?'0 0 0 2px #fff inset':'none'}}
+          ))
         )
       ),
       null,
-      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}},
         React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel'),
-        React.createElement('button',{className:'btn btn-primary',onClick:save},initial?'Update':'Add Category')
+        React.createElement('button',{className:'btn btn-primary',onClick:save},
+          initial?'Update':'Add '+(isSubCat?'Sub-Category':'Category'))
       )
     );
   };
 
-  const catStats=cats.map(cat=>{
-    const ci=items.filter(i=>String(i.category)===cat.id);
-    const totalQty=ci.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId),0);
-    const totalVal=ci.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*Number(i.costPrice||0),0);
-    const lowCount=ci.filter(i=>stockSvc.getQty(i.id,i.whId)<=i.minStock).length;
-    const subCats=catSvc.getChildren(cat.id);
-    return{...cat,count:ci.length,totalQty,totalVal,lowCount,subCats};
-  });
-  const rootStats=catStats.filter(c=>!c.parentId);
-  const subStats=catStats.filter(c=>!!c.parentId);
+  const DEFAULT_CAT_IDS=['MECH','ELEC','INST','SAFE','GEN'];
+  const rootCats=cats.filter(c=>!c.parentId);
 
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},
         React.createElement('h1',null,'Category Master'),
-        React.createElement('p',null,String(cats.length)+' categories — click a card to browse items')
+        React.createElement('p',null,String(rootCats.length)+' categories — '+String(cats.filter(c=>!!c.parentId).length)+' sub-categories')
       ),
       isSA&&React.createElement('div',{className:'ph-r'},
         React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(CatForm,{
           onClose:()=>setModal(null),
-          onSave:(d)=>{
-            catSvc.create(d);
-            toast('Category "'+d.name+'" added','success');
-            reloadCats();setModal(null);
-          }
+          onSave:(d)=>{catSvc.create(d);toast('"'+d.name+'" added','success');reloadCats();setModal(null);}
         }))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Category')
       )
     ),
-    subStats.length>0&&React.createElement('div',{className:'alert alert-blue',style:{marginBottom:12}},React.createElement(Ic,{n:'info',s:13}),' Sub-categories are shown inside their parent category card.'),
-    React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:14}},
-      rootStats.map(cat=>React.createElement('div',{
-        key:cat.id,
-        className:'card',
-        style:{borderTop:'4px solid '+cat.color,cursor:'pointer',transition:'all .15s'},
-        onClick:()=>{},
-      },
-        // Card header
-        React.createElement('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:12}},
-          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
-            React.createElement('div',{style:{fontSize:28,lineHeight:1}},cat.icon),
-            React.createElement('div',null,
-              React.createElement('div',{style:{fontWeight:700,fontSize:14,color:cat.color}},cat.name),
-              React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:'var(--txt3)',marginTop:2,letterSpacing:'1px'}},'ID: '+cat.id)
+
+    React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}},
+      rootCats.map(cat=>{
+        const subCats=cats.filter(c=>c.parentId===cat.id);
+        const allCatItems=(catId)=>itemSvc.getAll(null).filter(i=>i.category===catId);
+        const catItems=allCatItems(cat.id);
+        const totalItems=catItems.length + subCats.reduce((s,sc)=>s+allCatItems(sc.id).length,0);
+
+        return React.createElement('div',{key:cat.id,className:'card',style:{borderTop:'4px solid '+cat.color,padding:0,overflow:'hidden'}},
+
+          // ── Category Header ──
+          React.createElement('div',{style:{padding:'14px 14px 10px',background:cat.bg+'88'}},
+            React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
+              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+                React.createElement('div',{style:{fontSize:30}},cat.icon),
+                React.createElement('div',null,
+                  React.createElement('div',{style:{fontWeight:800,fontSize:15,color:cat.color}},cat.name),
+                  React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:cat.color,opacity:.6,letterSpacing:'1px'}},'ID: '+cat.id)
+                )
+              ),
+              isSA&&React.createElement('div',{style:{display:'flex',gap:4}},
+                React.createElement('button',{className:'btn btn-outline btn-icon btn-sm',title:'Edit',
+                  onClick:()=>setModal(React.createElement(CatForm,{initial:cat,onClose:()=>setModal(null),
+                    onSave:(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                  }))
+                },React.createElement(Ic,{n:'edit',s:12})),
+                !DEFAULT_CAT_IDS.includes(cat.id)&&React.createElement('button',{className:'btn btn-danger btn-icon btn-sm',title:'Delete',
+                  onClick:()=>{
+                    if(totalItems>0){toast('Cannot delete — '+totalItems+' items use this category','error');return;}
+                    if(subCats.length>0){toast('Delete all sub-categories first','error');return;}
+                    if(window.confirm('Delete "'+cat.name+'"?')){catSvc.delete(cat.id);toast('Deleted','success');reloadCats();}
+                  }
+                },React.createElement(Ic,{n:'trash',s:12}))
+              )
+            ),
+            React.createElement('div',{style:{marginTop:8,fontSize:12,color:cat.color}},
+              React.createElement('strong',null,String(totalItems)),
+              React.createElement('span',{style:{opacity:.7}},' total items · '+String(subCats.length)+' sub-categories')
             )
           ),
-          isSA&&React.createElement('div',{style:{display:'flex',gap:4},onClick:e=>e.stopPropagation()},
-            React.createElement('button',{
-              className:'btn btn-outline btn-icon btn-sm',
-              title:'Edit category',
+
+          // ── Sub-Categories ──
+          React.createElement('div',{style:{padding:'10px 14px'}},
+            subCats.length===0
+              ? React.createElement('div',{style:{fontSize:11,color:'var(--txt3)',fontStyle:'italic',marginBottom:8}},'No sub-categories yet.')
+              : React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:6,marginBottom:10}},
+                  subCats.map(sc=>{
+                    const scItems=allCatItems(sc.id);
+                    return React.createElement('div',{key:sc.id,
+                      style:{display:'flex',alignItems:'center',justifyContent:'space-between',
+                        padding:'6px 10px',borderRadius:8,
+                        background:sc.bg||cat.bg,border:'1px solid '+(sc.color||cat.color)+'33'}},
+                      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:7}},
+                        React.createElement('span',{style:{fontSize:16}},sc.icon),
+                        React.createElement('div',null,
+                          React.createElement('div',{style:{fontWeight:600,fontSize:12,color:sc.color||cat.color}},sc.name),
+                          React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},
+                            sc.id+' · '+String(scItems.length)+' items')
+                        )
+                      ),
+                      isSA&&React.createElement('div',{style:{display:'flex',gap:4}},
+                        React.createElement('button',{className:'btn btn-outline btn-xs',
+                          onClick:()=>setModal(React.createElement(CatForm,{initial:sc,parentCat:cat,
+                            onClose:()=>setModal(null),
+                            onSave:(d)=>{catSvc.update(sc.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                          }))
+                        },React.createElement(Ic,{n:'edit',s:11})),
+                        React.createElement('button',{className:'btn btn-danger btn-xs',
+                          onClick:()=>{
+                            if(scItems.length>0){toast('Cannot delete — '+scItems.length+' items use this sub-category','error');return;}
+                            if(window.confirm('Delete sub-category "'+sc.name+'"?')){catSvc.delete(sc.id);toast('Deleted','success');reloadCats();}
+                          }
+                        },React.createElement(Ic,{n:'trash',s:11}))
+                      )
+                    );
+                  })
+                ),
+
+            // ── Add Sub-Category Button ──
+            isSA&&React.createElement('button',{
+              className:'btn btn-outline btn-sm',
+              style:{width:'100%',borderStyle:'dashed',color:cat.color,borderColor:cat.color+'66'},
               onClick:()=>setModal(React.createElement(CatForm,{
-                initial:cat,
+                parentCat:cat,
                 onClose:()=>setModal(null),
-                onSave:(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                onSave:(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added to '+cat.name,'success');reloadCats();setModal(null);}
               }))
-            },React.createElement(Ic,{n:'edit',s:12})),
-            !['MECH','ELEC','INST','SAFE','GEN'].includes(cat.id)&&React.createElement('button',{
-              className:'btn btn-danger btn-icon btn-sm',
-              title:'Delete category (only if no items)',
-              onClick:()=>{
-                if(cat.count>0){toast('Cannot delete — '+cat.count+' items use this category','error');return;}
-                if(window.confirm('Delete category "'+cat.name+'"?')){catSvc.delete(cat.id);toast('Deleted','success');reloadCats();}
-              }
-            },React.createElement(Ic,{n:'trash',s:12}))
+            },React.createElement(Ic,{n:'plus',s:12}),' Add Sub-Category to ',cat.short)
           )
-        ),
-        // Stats grid
-        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}},
-          [
-            {l:'Items',v:String(cat.count),c:cat.color,ico:'📦'},
-            {l:'Total Qty',v:String(cat.totalQty),c:cat.color,ico:'📊'},
-          ].map(k=>React.createElement('div',{key:k.l,style:{background:cat.bg,borderRadius:8,padding:'8px 10px',textAlign:'center'}},
-            React.createElement('div',{style:{fontSize:18,fontWeight:800,color:k.c}},k.v),
-            React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:1}},k.l)
-          ))
-        ),
-        // Sub-categories
-        cat.subCats&&cat.subCats.length>0&&React.createElement('div',{style:{marginBottom:8}},
-          React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.5px',marginBottom:4}},'Sub-categories'),
-          React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:4}},
-            cat.subCats.map(sub=>{
-              const stat=catStats.find(cs=>cs.id===sub.id);
-              return React.createElement('span',{
-                key:sub.id,
-                style:{background:sub.bg||cat.bg,color:sub.color||cat.color,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,border:'1px solid '+(sub.color||cat.color)+'33'}
-              },sub.icon+' '+sub.short+(stat?' ('+stat.count+')':''));
-            })
-          )
-        ),
-        // Value and low stock
-        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',borderTop:'1px solid var(--border)',paddingTop:8}},
-          React.createElement('div',{style:{fontSize:12}},
-            React.createElement('span',{style:{color:'var(--green)',fontWeight:700}},sym+' '+fmt(cat.totalVal,0)),
-            React.createElement('span',{style:{color:'var(--txt3)',marginLeft:4,fontSize:10}},'stock value')
-          ),
-          cat.lowCount>0
-            ? React.createElement('span',{style:{background:'var(--red-light)',color:'var(--red)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},cat.lowCount+' low stock ⚠️')
-            : React.createElement('span',{style:{background:'var(--green-light)',color:'var(--green)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},'✅ OK')
-        )
-      ))
+        );
+      })
     )
   );
 }
+
 
 
 // ════════════════════════════════════════
@@ -3079,6 +3081,7 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
         )
       )
     ),
+    // ── Category + Sub-Category row ──
     React.createElement('div',{className:'frow3'},
       React.createElement('div',{className:'fg'},
         React.createElement('label',{className:'flbl'},'Category *'),
@@ -3087,12 +3090,21 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
         ),
         e.category&&React.createElement('div',{className:'fe'},e.category)
       ),
-      subCats.length>0&&React.createElement('div',{className:'fg'},
-        React.createElement('label',{className:'flbl'},'Sub-Category'),
-        React.createElement('select',{className:'fi',value:f.subCategory||'',onChange:ev=>s('subCategory',ev.target.value)},
-          React.createElement('option',{value:''},'— No Sub-Category —'),
-          subCats.map(sc=>React.createElement('option',{key:sc.id,value:sc.id},sc.icon+' '+sc.name))
-        )
+      React.createElement('div',{className:'fg'},
+        React.createElement('label',{className:'flbl'},'Sub-Category'+(subCats.length>0?' *':' (none available)')),
+        subCats.length>0
+          ? React.createElement('select',{
+              className:'fi',
+              value:f.subCategory||'',
+              onChange:ev=>s('subCategory',ev.target.value),
+              style:{borderColor:!f.subCategory?'var(--amber)':'var(--border2)'}
+            },
+              React.createElement('option',{value:''},'— Select Sub-Category —'),
+              subCats.map(sc=>React.createElement('option',{key:sc.id,value:sc.id},sc.icon+' '+sc.name))
+            )
+          : React.createElement('div',{style:{display:'flex',alignItems:'center',height:38,padding:'0 10px',background:'var(--off2)',borderRadius:'var(--r)',fontSize:12,color:'var(--txt3)',border:'1px solid var(--border2)'}},
+              'No sub-categories — add in Category Master'
+            )
       ),
       React.createElement('div',{className:'fg'},
         React.createElement('label',{className:'flbl'},'Warehouse'),
