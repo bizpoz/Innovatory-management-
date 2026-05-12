@@ -414,13 +414,38 @@ const today=()=>new Date().toISOString().split('T')[0];
 const fmt=(n,d=2)=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtDate=(s)=>s?new Date(s).toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'}):'';
 
-const CATS=[
+const DEFAULT_CATS=[
   {id:'MECH',name:'Mechanical Items',short:'Mechanical',color:'#2563eb',bg:'#eff6ff',icon:'⚙️'},
   {id:'ELEC',name:'Electrical Items',short:'Electrical',color:'#d97706',bg:'#fffbeb',icon:'⚡'},
   {id:'INST',name:'Instrumentation Items',short:'Instrumentation',color:'#7c3aed',bg:'#f5f3ff',icon:'📡'},
   {id:'SAFE',name:'Safety Items',short:'Safety',color:'#16a34a',bg:'#f0fdf4',icon:'🛡️'},
   {id:'GEN',name:'General Items',short:'General',color:'#0891b2',bg:'#ecfeff',icon:'📦'},
 ];
+
+// catSvc — manages categories in localStorage
+const catSvc={
+  getAll:()=>JSON.parse(localStorage.getItem('gs_cats')||'null')||DEFAULT_CATS,
+  save:(cats)=>localStorage.setItem('gs_cats',JSON.stringify(cats)),
+  create:(d)=>{
+    const cats=catSvc.getAll();
+    const cat={...d,id:d.id.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)||('CAT'+Date.now().toString(36).slice(-3).toUpperCase())};
+    if(cats.find(c=>c.id===cat.id))throw new Error('Category code already exists');
+    catSvc.save([...cats,cat]);return cat;
+  },
+  update:(id,d)=>{
+    const cats=catSvc.getAll().map(c=>c.id===id?{...c,...d,id}:c);
+    catSvc.save(cats);
+  },
+  delete:(id)=>{
+    catSvc.save(catSvc.getAll().filter(c=>c.id!==id));
+  },
+};
+
+// CATS — always reads from catSvc (reactive via getter pattern)
+// Components that need live cats should call catSvc.getAll() inside render
+// This global is kept for backward compat with static references
+let CATS=catSvc.getAll();
+const refreshCATS=()=>{CATS=catSvc.getAll();};
 
 const UNITS=['NOS','KG','MTR','LTR','SET','BOX','PAIR','ROLL','PKT','BTL'];
 
@@ -2478,70 +2503,187 @@ function StockTransfer(){
 //  CATEGORY MASTER
 // ════════════════════════════════════════
 function Categories(){
-  const {toast,setModal,whId,isSA,setDrilldown,nav}=useCtx();
+  const {toast,setModal,whId,isSA,reload}=useCtx();
+  const [cats,setCats]=useState(catSvc.getAll());
   const items=itemSvc.getAll(whId);
-  const racks=rackSvc.getAll(whId);
   const sett=settSvc.get();
   const sym=sett.currencySymbol||'QR';
 
-  const catStats=CATS.map(c=>{
-    const ci=items.filter(i=>i.category===c.id);
-    const totalQty=ci.reduce((s,i)=>s+stockSvc.getQty(i.id),0);
-    const totalVal=ci.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*i.costPrice,0);
-    const lowItems=ci.filter(i=>stockSvc.getQty(i.id,i.whId)<=i.minStock).length;
-    return{...c,itemCount:ci.length,totalQty,totalVal,lowItems};
+  const reloadCats=()=>{refreshCATS();setCats(catSvc.getAll());reload();};
+
+  // Preset icon/color options for the form
+  const ICONS=['📦','⚙️','⚡','📡','🛡️','🔧','🏭','🔬','💡','🪛','🔩','🏗️','🧪','🚿','🔋','📋','🗜️','🪝','💎','🏆'];
+  const COLORS=[
+    {color:'#2563eb',bg:'#eff6ff',label:'Blue'},
+    {color:'#d97706',bg:'#fffbeb',label:'Amber'},
+    {color:'#7c3aed',bg:'#f5f3ff',label:'Purple'},
+    {color:'#16a34a',bg:'#f0fdf4',label:'Green'},
+    {color:'#0891b2',bg:'#ecfeff',label:'Teal'},
+    {color:'#dc2626',bg:'#fef2f2',label:'Red'},
+    {color:'#ea580c',bg:'#fff7ed',label:'Orange'},
+    {color:'#0284c7',bg:'#f0f9ff',label:'Sky'},
+    {color:'#9333ea',bg:'#faf5ff',label:'Violet'},
+    {color:'#059669',bg:'#ecfdf5',label:'Emerald'},
+  ];
+
+  const CatForm=({initial,onSave,onClose})=>{
+    const [f,setF]=useState(initial||{id:'',name:'',short:'',icon:'📦',color:'#2563eb',bg:'#eff6ff'});
+    const s2=(k,v)=>setF(p=>({...p,[k]:v}));
+    const [err,setErr]=useState({});
+
+    const save=()=>{
+      const e={};
+      if(!f.name)e.name='Required';
+      if(!f.id&&!initial)e.id='Required';
+      if(!f.short)e.short='Required';
+      if(Object.keys(e).length){setErr(e);return;}
+      try{ onSave(f); }
+      catch(ex){ setErr({id:ex.message}); }
+    };
+
+    return React.createElement(Modal,{title:initial?'Edit Category':'Add New Category',onClose,size:'sm'},
+      // Preview badge
+      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',background:f.bg,borderRadius:'var(--r)',border:'2px solid '+f.color,marginBottom:14}},
+        React.createElement('div',{style:{fontSize:28}},f.icon),
+        React.createElement('div',null,
+          React.createElement('div',{style:{fontWeight:700,fontSize:15,color:f.color}},f.name||'Category Name'),
+          React.createElement('div',{style:{fontSize:11,color:f.color,opacity:.7}},f.short||'Short')
+        )
+      ),
+      React.createElement('div',{className:'frow'},
+        !initial&&React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'Category Code * (e.g. MECH, ELEC)'),
+          React.createElement('input',{className:'fi',value:f.id,onChange:ev=>s2('id',ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)),placeholder:'e.g. MECH',style:{fontFamily:'var(--mono)',fontWeight:700,letterSpacing:'1px'}}),
+          err.id&&React.createElement('div',{className:'fe'},err.id)
+        ),
+        React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'Full Name *'),
+          React.createElement('input',{className:'fi',value:f.name,onChange:ev=>s2('name',ev.target.value)}),
+          err.name&&React.createElement('div',{className:'fe'},err.name)
+        )
+      ),
+      React.createElement('div',{className:'fg'},
+        React.createElement('label',{className:'flbl'},'Short Name / Badge Label *'),
+        React.createElement('input',{className:'fi',value:f.short,onChange:ev=>s2('short',ev.target.value),placeholder:'e.g. Mechanical, Electrical'}),
+        err.short&&React.createElement('div',{className:'fe'},err.short)
+      ),
+      // Icon picker
+      React.createElement('div',{className:'fg'},
+        React.createElement('label',{className:'flbl'},'Icon'),
+        React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+          ICONS.map(ico=>React.createElement('div',{
+            key:ico,
+            onClick:()=>s2('icon',ico),
+            style:{width:36,height:36,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,cursor:'pointer',background:f.icon===ico?f.color+'22':'var(--off2)',border:'2px solid '+(f.icon===ico?f.color:'transparent'),transition:'all .1s'}
+          },ico))
+        )
+      ),
+      // Color picker
+      React.createElement('div',{className:'fg'},
+        React.createElement('label',{className:'flbl'},'Color Theme'),
+        React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+          COLORS.map(col=>React.createElement('div',{
+            key:col.color,
+            onClick:()=>{s2('color',col.color);s2('bg',col.bg);},
+            title:col.label,
+            style:{width:32,height:32,borderRadius:'50%',background:col.color,cursor:'pointer',border:f.color===col.color?'3px solid #000':'3px solid transparent',boxShadow:f.color===col.color?'0 0 0 2px #fff inset':'none',transition:'all .1s'}
+          }))
+        )
+      ),
+      null,
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel'),
+        React.createElement('button',{className:'btn btn-primary',onClick:save},initial?'Update':'Add Category')
+      )
+    );
+  };
+
+  const catStats=cats.map(cat=>{
+    const ci=items.filter(i=>String(i.category)===cat.id);
+    const totalQty=ci.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId),0);
+    const totalVal=ci.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*Number(i.costPrice||0),0);
+    const lowCount=ci.filter(i=>stockSvc.getQty(i.id,i.whId)<=i.minStock).length;
+    return{...cat,count:ci.length,totalQty,totalVal,lowCount};
   });
 
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
-      React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Category Master'),React.createElement('p',null,'Manage item categories'))
+      React.createElement('div',{className:'ph-l'},
+        React.createElement('h1',null,'Category Master'),
+        React.createElement('p',null,String(cats.length)+' categories — click a card to browse items')
+      ),
+      isSA&&React.createElement('div',{className:'ph-r'},
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(CatForm,{
+          onClose:()=>setModal(null),
+          onSave:(d)=>{
+            catSvc.create(d);
+            toast('Category "'+d.name+'" added','success');
+            reloadCats();setModal(null);
+          }
+        }))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Category')
+      )
     ),
-    // Category cards
-    React.createElement('div',{className:'grid g3',style:{marginBottom:20}},
-      catStats.map(c=>React.createElement('div',{key:c.id,className:'card',style:{borderTop:`3px solid ${c.color}`}},
-        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}},
-          React.createElement('div',{style:{width:46,height:46,borderRadius:12,background:c.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}},c.icon),
-          React.createElement('div',{style:{textAlign:'right'}},
-            c.lowItems>0&&React.createElement('span',{className:'badge b-red',style:{marginBottom:4}},c.lowItems+' low'),
-            React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},c.id)
+    React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:14}},
+      catStats.map(cat=>React.createElement('div',{
+        key:cat.id,
+        className:'card',
+        style:{borderTop:'4px solid '+cat.color,cursor:'pointer',transition:'all .15s'},
+        onClick:()=>{},
+      },
+        // Card header
+        React.createElement('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:12}},
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+            React.createElement('div',{style:{fontSize:28,lineHeight:1}},cat.icon),
+            React.createElement('div',null,
+              React.createElement('div',{style:{fontWeight:700,fontSize:14,color:cat.color}},cat.name),
+              React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:'var(--txt3)',marginTop:2,letterSpacing:'1px'}},'ID: '+cat.id)
+            )
+          ),
+          isSA&&React.createElement('div',{style:{display:'flex',gap:4},onClick:e=>e.stopPropagation()},
+            React.createElement('button',{
+              className:'btn btn-outline btn-icon btn-sm',
+              title:'Edit category',
+              onClick:()=>setModal(React.createElement(CatForm,{
+                initial:cat,
+                onClose:()=>setModal(null),
+                onSave:(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
+              }))
+            },React.createElement(Ic,{n:'edit',s:12})),
+            !['MECH','ELEC','INST','SAFE','GEN'].includes(cat.id)&&React.createElement('button',{
+              className:'btn btn-danger btn-icon btn-sm',
+              title:'Delete category (only if no items)',
+              onClick:()=>{
+                if(cat.count>0){toast('Cannot delete — '+cat.count+' items use this category','error');return;}
+                if(window.confirm('Delete category "'+cat.name+'"?')){catSvc.delete(cat.id);toast('Deleted','success');reloadCats();}
+              }
+            },React.createElement(Ic,{n:'trash',s:12}))
           )
         ),
-        React.createElement('div',{style:{fontWeight:800,fontSize:15,marginBottom:3}},c.name),
-        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginTop:12}},
-          [['Items',c.itemCount,'var(--txt)'],['Qty',c.totalQty,'var(--txt)'],['Value',sym+fmt(c.totalVal,0),c.color]].map(([l,v,col])=>
-            React.createElement('div',{key:l,style:{background:c.bg,borderRadius:6,padding:'8px',textAlign:'center'}},
-              React.createElement('div',{style:{fontSize:13,fontWeight:800,color:col}},v),
-              React.createElement('div',{style:{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.5px',marginTop:2}},l)
-            )
-          )
+        // Stats grid
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:10}},
+          [
+            {l:'Items',v:String(cat.count),c:cat.color,ico:'📦'},
+            {l:'Total Qty',v:String(cat.totalQty),c:cat.color,ico:'📊'},
+          ].map(k=>React.createElement('div',{key:k.l,style:{background:cat.bg,borderRadius:8,padding:'8px 10px',textAlign:'center'}},
+            React.createElement('div',{style:{fontSize:18,fontWeight:800,color:k.c}},k.v),
+            React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:1}},k.l)
+          ))
+        ),
+        // Value and low stock
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',borderTop:'1px solid var(--border)',paddingTop:8}},
+          React.createElement('div',{style:{fontSize:12}},
+            React.createElement('span',{style:{color:'var(--green)',fontWeight:700}},sym+' '+fmt(cat.totalVal,0)),
+            React.createElement('span',{style:{color:'var(--txt3)',marginLeft:4,fontSize:10}},'stock value')
+          ),
+          cat.lowCount>0
+            ? React.createElement('span',{style:{background:'var(--red-light)',color:'var(--red)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},cat.lowCount+' low stock ⚠️')
+            : React.createElement('span',{style:{background:'var(--green-light)',color:'var(--green)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},'✅ OK')
         )
       ))
-    ),
-    // Table
-    React.createElement('div',{className:'card'},
-      React.createElement('div',{className:'card-hd'},React.createElement('span',{className:'card-t'},'Category Summary Table')),
-      React.createElement('div',{className:'tw',style:{border:'none',boxShadow:'none'}},
-        React.createElement('table',null,
-          React.createElement('thead',null,React.createElement('tr',null,
-            ['Code','Category Name','Description','Items','Total Qty','Stock Value','Low Stock','Status'].map(h=>React.createElement('th',{key:h},h))
-          )),
-          React.createElement('tbody',null,
-            catStats.map(c=>React.createElement('tr',{key:c.id},
-              React.createElement('td',null,React.createElement('span',{className:'mono',style:{background:c.bg,color:c.color,padding:'2px 7px',borderRadius:4,fontWeight:700}},c.id)),
-              React.createElement('td',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},c.icon,' ',React.createElement('span',{style:{fontWeight:600}},c.name))),
-              React.createElement('td',null,React.createElement('span',{style:{color:'var(--txt2)',fontSize:12}},c.name.replace(' Items','') +' related items')),
-              React.createElement('td',null,React.createElement('strong',null,c.itemCount)),
-              React.createElement('td',null,c.totalQty),
-              React.createElement('td',null,React.createElement('strong',{style:{color:'var(--green)'}},sym+' '+fmt(c.totalVal,0))),
-              React.createElement('td',null,c.lowItems>0?React.createElement(Badge,{c:'red'},c.lowItems+' items'):React.createElement('span',{className:'sdot normal'},'None')),
-              React.createElement('td',null,React.createElement('span',{className:'sdot active'},'Active'))
-            ))
-          )
-        )
-      )
     )
   );
 }
+
 
 // ════════════════════════════════════════
 //  ITEM MASTER
@@ -5740,7 +5882,7 @@ function Approvals(){
 }
 
 function Settings(){
-  const {toast}=useCtx();
+  const {toast,setModal}=useCtx();
   const [s,setS]=useState(settSvc.get());
   const sf=(k,v)=>setS(p=>({...p,[k]:v}));
   const [tab,setTab]=useState('general');
@@ -5773,20 +5915,52 @@ function Settings(){
           React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save')
         )
       ),
-      React.createElement('div',{className:'alert alert-red',style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
-        React.createElement('div',null,
-          React.createElement('div',{style:{fontWeight:600,marginBottom:2}},'Reset Local Data'),
-          React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Clears browser cache. Supabase data is safe.')
-        ),
-        React.createElement('button',{
-          className:'btn btn-danger btn-sm',
-          onClick:()=>{
-            if(window.confirm('Clear all local cache data?')){
-              Object.keys(localStorage).filter(k=>k.startsWith('gs_')).forEach(k=>localStorage.removeItem(k));
-              window.location.reload();
-            }
-          }
-        },'Reset Cache')
+      React.createElement('div',{className:'card',style:{marginTop:14,border:'1.5px solid var(--red-mid)',overflow:'hidden'}},
+        React.createElement('div',{style:{background:'var(--red-light)',padding:'10px 14px',borderBottom:'1px solid var(--red-mid)',fontWeight:700,fontSize:13,color:'var(--red)'}},'⚠️ Danger Zone'),
+        React.createElement('div',{style:{padding:'14px'}},
+          // Clear all data with password
+          React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px',background:'var(--off2)',borderRadius:'var(--r)',marginBottom:10}},
+            React.createElement('div',null,
+              React.createElement('div',{style:{fontWeight:700,fontSize:13,marginBottom:2}},'🗑️ Clear ALL Application Data'),
+              React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Permanently deletes all items, vouchers, transactions, users and stock. Requires admin password.')
+            ),
+            React.createElement('button',{
+              className:'btn btn-danger btn-sm',
+              onClick:()=>{
+                setModal(React.createElement(ClearDataModal,{
+                  onClose:()=>setModal(null),
+                  onConfirmed:()=>{
+                    // Clear all localStorage keys
+                    const keys=Object.keys(localStorage).filter(k=>k.startsWith('gs_'));
+                    keys.forEach(k=>localStorage.removeItem(k));
+                    // Also clear cats so defaults reload
+                    localStorage.removeItem('gs_cats');
+                    setModal(null);
+                    toast('All data cleared. Reloading...','success');
+                    setTimeout(()=>window.location.reload(),1200);
+                  }
+                }));
+              }
+            },'Clear All Data')
+          ),
+          // Reset local cache only
+          React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px',background:'var(--off2)',borderRadius:'var(--r)'}},
+            React.createElement('div',null,
+              React.createElement('div',{style:{fontWeight:700,fontSize:13,marginBottom:2}},'🔄 Reset Local Cache Only'),
+              React.createElement('div',{style:{fontSize:11,color:'var(--txt2)'}},'Clears browser cache. Supabase data remains safe and will reload on next visit.')
+            ),
+            React.createElement('button',{
+              className:'btn btn-outline btn-sm',
+              style:{borderColor:'var(--amber)',color:'var(--amber)'},
+              onClick:()=>{
+                if(window.confirm('Clear browser cache? Supabase data will be re-fetched on reload.')){
+                  Object.keys(localStorage).filter(k=>k.startsWith('gs_')).forEach(k=>localStorage.removeItem(k));
+                  window.location.reload();
+                }
+              }
+            },'Reset Cache')
+          )
+        )
       )
     ),
 
@@ -6106,6 +6280,78 @@ function ChangePasswordModal({user,onClose,onSave}){
   );
 }
 
+
+
+// ── Clear All Data Modal (password protected) ──
+function ClearDataModal({onClose,onConfirmed}){
+  const [pw,setPw]=useState('');
+  const [step,setStep]=useState('confirm'); // confirm | password | final
+  const [err,setErr]=useState('');
+
+  const checkPw=()=>{
+    const adminUser=userSvc.getAll().find(u=>u.role==='Super Admin');
+    if(!adminUser){setErr('No admin user found');return;}
+    if(pw!==adminUser.password){setErr('Incorrect admin password');return;}
+    setStep('final');
+  };
+
+  return React.createElement(Modal,{title:'⚠️ Clear All Data',onClose,size:'sm'},
+    step==='confirm'&&React.createElement('div',null,
+      React.createElement('div',{style:{textAlign:'center',padding:'16px 0'}},
+        React.createElement('div',{style:{fontSize:52,marginBottom:12}},'🗑️'),
+        React.createElement('div',{style:{fontWeight:800,fontSize:16,color:'var(--red)',marginBottom:8}},'This will permanently delete:'),
+        React.createElement('div',{style:{background:'var(--red-light)',border:'1px solid var(--red-mid)',borderRadius:'var(--r)',padding:'12px 16px',textAlign:'left',marginBottom:16}},
+          ['All items & products','All stock quantities','All vouchers (GRN, GIN, Transfers)','All consumption, production, MR, DMG records','All users (except Super Admin)','All racks and warehouses','All categories (custom ones)','All suppliers'].map((item,i)=>
+            React.createElement('div',{key:i,style:{fontSize:12,color:'var(--red)',padding:'2px 0',display:'flex',alignItems:'center',gap:6}},
+              React.createElement('span',null,'✕'),item
+            )
+          )
+        ),
+        React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:16}},'⚠️ This action cannot be undone. Supabase data (if connected) will also need to be cleared separately.')
+      ),
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel'),
+        React.createElement('button',{className:'btn btn-danger',onClick:()=>setStep('password')},'I understand, continue →')
+      )
+    ),
+    step==='password'&&React.createElement('div',null,
+      React.createElement('div',{style:{textAlign:'center',marginBottom:16}},
+        React.createElement('div',{style:{fontSize:36,marginBottom:8}},'🔐'),
+        React.createElement('div',{style:{fontWeight:700,fontSize:14}},'Enter Admin Password to Confirm')
+      ),
+      React.createElement('div',{className:'fg',style:{marginBottom:8}},
+        React.createElement('label',{className:'flbl'},'Admin Password'),
+        React.createElement('input',{
+          className:'fi',type:'password',value:pw,
+          onChange:e=>{setPw(e.target.value);setErr('');},
+          onKeyDown:e=>e.key==='Enter'&&checkPw(),
+          placeholder:'Enter Super Admin password',
+          autoFocus:true
+        })
+      ),
+      err&&React.createElement('div',{className:'alert alert-red',style:{marginBottom:8}},React.createElement(Ic,{n:'alert',s:13}),' ',err),
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-outline',onClick:()=>setStep('confirm')},'← Back'),
+        React.createElement('button',{className:'btn btn-danger',onClick:checkPw},'Verify & Continue')
+      )
+    ),
+    step==='final'&&React.createElement('div',null,
+      React.createElement('div',{style:{textAlign:'center',padding:'16px 0'}},
+        React.createElement('div',{style:{fontSize:52,marginBottom:12}},'⚠️'),
+        React.createElement('div',{style:{fontWeight:800,fontSize:16,color:'var(--red)',marginBottom:8}},'Last Chance!'),
+        React.createElement('div',{style:{fontSize:13,color:'var(--txt2)',marginBottom:16}},'Password verified. Click the red button to permanently clear ALL data from this device.')
+      ),
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel — Keep Data'),
+        React.createElement('button',{
+          className:'btn btn-danger',
+          style:{fontWeight:700},
+          onClick:onConfirmed
+        },'🗑️ DELETE EVERYTHING')
+      )
+    )
+  );
+}
 
 function App(){
   const {user,page,nav,modal,sideOpen,setSideOpen,whId,isSA}=useCtx();
