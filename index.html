@@ -892,16 +892,41 @@ const itemSvc = {
     return `${catId}-${String(n).padStart(4,'0')}`;
   },
   async create(d) {
+    const homeWhId = d.whId;
+    const allWHs = whSvc.getAll();
+
+    // Insert the item in the home warehouse
     const row = await sb.insert('items', {
-      warehouse_id: d.whId, rack_id: d.rackId || null, code: d.code, name: d.name,
+      warehouse_id: homeWhId, rack_id: d.rackId || null, code: d.code, name: d.name,
       description: d.description, category: d.category, unit: d.unit,
       cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
       status: d.status || 'Active', opening_qty: Number(d.openingQty) || 0, sub_category: d.subCategory||null,
       is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
     });
+
+    // Set opening stock for home warehouse
+    if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, homeWhId, Number(d.openingQty));
+
+    // Auto-create the same item in every OTHER warehouse with 0 stock
+    const otherWHs = allWHs.filter(w => w.id !== homeWhId);
+    for (const wh of otherWHs) {
+      try {
+        const copy = await sb.insert('items', {
+          warehouse_id: wh.id, rack_id: null, code: d.code, name: d.name,
+          description: d.description, category: d.category, unit: d.unit,
+          cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
+          status: d.status || 'Active', opening_qty: 0, sub_category: d.subCategory||null,
+          is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
+        });
+        // Stock entry with 0 qty so it appears in stock view
+        await stockSvc.setQty(copy.id, wh.id, 0);
+      } catch(e) {
+        // Skip if item code already exists in that warehouse
+        console.warn(`Item ${d.code} already exists in ${wh.name}, skipping`);
+      }
+    }
+
     this._cache = null; await this.loadAll();
-    // Set opening stock
-    if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, d.whId, Number(d.openingQty));
     return mapItem(row);
   },
   async update(id, d) {
