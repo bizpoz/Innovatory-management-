@@ -2597,7 +2597,7 @@ function StockTransfer(){
   const addRow=()=>setForm(p=>({...p,items:[...p.items,{itemId:'',unit:'',availQty:0,qty:''}]}));
   const removeRow=idx=>setForm(p=>({...p,items:p.items.filter((_,i)=>i!==idx)}));
 
-  const submitTrn=()=>{
+  const submitTrn=async()=>{
     if(!fromWh||!toWh){toast('Select both warehouses','error');return;}
     if(fromWh===toWh){toast('Source and destination must be different warehouses','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qty&&Number(r.qty)>0);
@@ -2609,7 +2609,7 @@ function StockTransfer(){
         return;
       }
     }
-    trnSvc.create({
+    await trnSvc.create({
       date:form.date,fromWhId:fromWh,toWhId:toWh,
       purpose:form.purpose,remarks:form.remarks,
       submittedBy:user?.name,items:valid,
@@ -4012,12 +4012,12 @@ function GRVEntry(){
     ));
   };
 
-  const submitGRV=(isDraft)=>{
+  const submitGRV=async(isDraft)=>{
     if(!form.supplierId){toast('Please select a supplier','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qtyReceived);
     if(!valid.length){toast('Add at least one item with quantity','error');return;}
     const sup=allSups.find(s=>s.id===form.supplierId);
-    grvSvc.create({...form,supplierName:sup?.name||'',items:valid,totalQty,totalAmount:totalAmt,whId:selWh,status:isDraft?'Draft':'Pending Approval'});
+    await grvSvc.create({...form,supplierName:sup?.name||'',items:valid,totalQty,totalAmount:totalAmt,whId:selWh,status:isDraft?'Draft':'Pending Approval'});
     toast(isDraft?'Purchase saved as draft':'Purchase submitted — Pending Approval','success');
     reloadGrvs();setForm(blankForm());setTab('list');
   };
@@ -4345,7 +4345,7 @@ function GIVEntry(){
     ));
   };
 
-  const submitGIV=()=>{
+  const submitGIV=async()=>{
     if(!form.issuedTo){toast('Please select a department','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qtyIssued);
     if(!valid.length){toast('Add at least one item with quantity','error');return;}
@@ -4355,9 +4355,9 @@ function GIVEntry(){
         toast('Insufficient stock for: '+(item?.name||row.itemId),'error');return;
       }
     }
-    givSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
+    await givSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
     toast('GIN submitted — Pending Approval','success');
-    reloadGivs();setForm(blankForm());setTab('list');
+    await reloadGivs();setForm(blankForm());setTab('list');
   };
 
   const filteredGivs=givs.filter(g=>!q||(g.givNo||'').toLowerCase().includes(q.toLowerCase())||(g.issuedTo||'').toLowerCase().includes(q.toLowerCase()));
@@ -4579,7 +4579,7 @@ function Consumption(){
     ));
   };
 
-  const submit=()=>{
+  const submit=async()=>{
     if(!form.jobType){toast('Select job type','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qty&&Number(r.qty)>0);
     if(!valid.length){toast('Add at least one item','error');return;}
@@ -4588,7 +4588,7 @@ function Consumption(){
         toast('Insufficient stock for: '+(allItems.find(i=>i.id===row.itemId)?.name||'-'),'error');return;
       }
     }
-    conSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
+    await conSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
     toast('Consumption submitted — Pending Approval','success');
     reloadCons();setForm(blankForm());setTab('list');
   };
@@ -4799,7 +4799,7 @@ function Production(){
   const remRaw=idx=>setForm(p=>({...p,rawMaterials:p.rawMaterials.filter((_,i)=>i!==idx)}));
   const remOut=idx=>setForm(p=>({...p,outputs:p.outputs.filter((_,i)=>i!==idx)}));
 
-  const submit=()=>{
+  const submit=async()=>{
     if(!form.productName){toast('Enter product/batch name','error');return;}
     const validRaw=form.rawMaterials.filter(r=>r.itemId&&r.qty&&Number(r.qty)>0);
     const validOut=form.outputs.filter(r=>r.itemName&&r.qty&&Number(r.qty)>0);
@@ -4809,7 +4809,7 @@ function Production(){
         toast('Insufficient raw material: '+(allItems.find(i=>i.id===row.itemId)?.name||'-'),'error');return;
       }
     }
-    proSvc.create({...form,rawMaterials:validRaw,outputs:validOut,whId:selWh});
+    await proSvc.create({...form,rawMaterials:validRaw,outputs:validOut,whId:selWh});
     toast('Production order submitted — Pending Approval','success');
     reloadPros();setForm(blankForm());setTab('list');
   };
@@ -5072,11 +5072,11 @@ function MaterialRequest(){
   const addRow=()=>setForm(p=>({...p,items:[...p.items,{itemId:'',itemName:'',unit:'',availQty:0,qtyRequired:'',remarks:''}]}));
   const removeRow=idx=>setForm(p=>({...p,items:p.items.filter((_,i)=>i!==idx)}));
 
-  const submit=()=>{
+  const submit=async()=>{
     if(!form.department){toast('Select department','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qtyRequired&&Number(r.qtyRequired)>0);
     if(!valid.length){toast('Add at least one item','error');return;}
-    mrSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
+    await mrSvc.create({...form,items:valid,totalItems:valid.length,whId:selWh});
     toast('Material Request submitted — Pending Approval','success');
     reloadMrs();setForm(blankForm());setTab('list');
   };
@@ -5301,7 +5301,7 @@ function DamagedProducts(){
   const removeRow=idx=>setForm(p=>({...p,items:p.items.filter((_,i)=>i!==idx)}));
   const totalLoss=form.items.reduce((s,r)=>s+Number(r.totalLoss||0),0);
 
-  const submit=()=>{
+  const submit=async()=>{
     if(!form.damageType){toast('Select damage type','error');return;}
     const valid=form.items.filter(r=>r.itemId&&r.qty&&Number(r.qty)>0);
     if(!valid.length){toast('Add at least one damaged item','error');return;}
@@ -5310,7 +5310,7 @@ function DamagedProducts(){
         toast('Damaged qty exceeds available stock for: '+(allItems.find(i=>i.id===row.itemId)?.name||'-'),'error');return;
       }
     }
-    dmgSvc.create({...form,items:valid,totalLoss,totalItems:valid.length,whId:selWh});
+    await dmgSvc.create({...form,items:valid,totalLoss,totalItems:valid.length,whId:selWh});
     toast('Damage report submitted — Pending Approval','success');
     reloadDmgs();setForm(blankForm());setTab('list');
   };
