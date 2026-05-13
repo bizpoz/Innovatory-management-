@@ -618,7 +618,7 @@ const sb = {
   },
   // RPC — call a Postgres function
   async rpc(fn, params = {}) {
-    const res = await sbFetch(`../rpc/${fn}`, {
+    const res = await sbFetch(`rpc/${fn}`, {
       method: 'POST',
       body: JSON.stringify(params),
     });
@@ -629,7 +629,7 @@ const sb = {
 // ── Voucher number (calls Postgres function) ──
 const nextVoucherNo = async (type, prefix) => {
   try {
-    const result = await sbFetch(`../rpc/next_voucher_no`, {
+    const result = await sbFetch(`rpc/next_voucher_no`, {
       method: 'POST',
       body: JSON.stringify({ p_type: type, p_prefix: prefix }),
     });
@@ -960,9 +960,9 @@ const itemSvc = {
 
     this._cache = null; await this.loadAll();
     return mapItem(row);
-    } finally {
-      _itemSubmitting=false;
-    }
+  } finally {
+    _itemSubmitting=false;
+  }
   },
   async update(id, d) {
     await sb.update('items', `id=eq.${id}`, {
@@ -3033,7 +3033,7 @@ function Categories(){
       isSA&&React.createElement('div',{className:'ph-r'},
         React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(CatForm,{
           onClose:()=>setModal(null),
-          onSave:(d)=>{catSvc.create(d);toast('"'+d.name+'" added','success');reloadCats();setModal(null);}
+          onSave:async(d)=>{catSvc.create(d);toast('"'+d.name+'" added','success');reloadCats();setModal(null);}
         }))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Category')
       )
     ),
@@ -3064,7 +3064,7 @@ function Categories(){
               isSA&&React.createElement('div',{style:{display:'flex',gap:4},onClick:e=>e.stopPropagation()},
                 React.createElement('button',{className:'btn btn-outline btn-icon btn-sm',title:'Edit',
                   onClick:()=>setModal(React.createElement(CatForm,{initial:cat,onClose:()=>setModal(null),
-                    onSave:(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                    onSave:async(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
                   }))},React.createElement(Ic,{n:'edit',s:12})),
                 !DEFAULT_CAT_IDS.includes(cat.id)&&React.createElement('button',{className:'btn btn-danger btn-icon btn-sm',title:'Delete',
                   onClick:()=>{
@@ -3111,7 +3111,7 @@ function Categories(){
                         isSA&&React.createElement('div',{style:{display:'flex',gap:3}},
                           React.createElement('button',{className:'btn btn-outline btn-xs',
                             onClick:e=>{e.stopPropagation();setModal(React.createElement(CatForm,{initial:sc,parentCat:cat,onClose:()=>setModal(null),
-                              onSave:(d)=>{catSvc.update(sc.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                              onSave:async(d)=>{catSvc.update(sc.id,d);toast('Updated','success');reloadCats();setModal(null);}
                             }))}},React.createElement(Ic,{n:'edit',s:10})),
                           React.createElement('button',{className:'btn btn-danger btn-xs',
                             onClick:e=>{e.stopPropagation();
@@ -3128,7 +3128,7 @@ function Categories(){
               style:{width:'100%',borderStyle:'dashed',color:cat.color,borderColor:cat.color+'66'},
               onClick:e=>{e.stopPropagation();setModal(React.createElement(CatForm,{
                 parentCat:cat,onClose:()=>setModal(null),
-                onSave:(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added','success');reloadCats();setModal(null);}
+                onSave:async(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added','success');reloadCats();setModal(null);}
               }));}
             },React.createElement(Ic,{n:'plus',s:12}),' Add Sub-Category to ',cat.short),
 
@@ -3670,8 +3670,8 @@ function Racks(){
           React.createElement('p',null,rack.whName,' · ',rack.description||'No description')
         ),
         React.createElement('div',{className:'ph-r'},
-          React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>setModal(React.createElement(RackForm,{initial:rack,onClose:()=>setModal(null),onSave:d=>{rackSvc.update(rack.id,{...d,capacity:Number(d.capacity)});toast('Updated','success');reloadRacks();setModal(null);setDetail({...rack,...d});}}))},'✏️ Edit'),
-          React.createElement('button',{className:'btn btn-danger btn-sm',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Rack',text:'Delete "'+rack.code+'"?',onCancel:()=>setModal(null),onOk:()=>{rackSvc.delete(rack.id);toast('Deleted','success');reloadRacks();setDetail(null);setModal(null);}}))},'🗑️ Delete')
+          React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>setModal(React.createElement(RackForm,{initial:rack,onClose:()=>setModal(null),onSave:async d=>{await rackSvc.update(rack.id,{...d,capacity:Number(d.capacity)});toast('Updated','success');reloadRacks();setModal(null);setDetail({...rack,...d});}}))},'✏️ Edit'),
+          React.createElement('button',{className:'btn btn-danger btn-sm',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Rack',text:'Delete "'+rack.code+'"?',onCancel:()=>setModal(null),onOk:async()=>{await rackSvc.delete(rack.id);toast('Deleted','success');reloadRacks();setDetail(null);setModal(null);}}))},'🗑️ Delete')
         )
       ),
       // Stats
@@ -3751,7 +3751,7 @@ function Racks(){
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Rack Management'),React.createElement('p',null,'Click any rack to see all items stored in it')),
       React.createElement('div',{className:'ph-r'},
         isSA&&React.createElement('select',{className:'fs',style:{marginRight:8},value:selWh,onChange:e=>{setSelWh(e.target.value);setRacks(rackSvc.getAll(e.target.value||null));}},whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name))),
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(RackForm,{onClose:()=>setModal(null),onSave:d=>{rackSvc.create({...d,whId:d.whId||selWh||whId,capacity:Number(d.capacity)});toast('Rack added','success');reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Rack')
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(RackForm,{onClose:()=>setModal(null),onSave:async d=>{await rackSvc.create({...d,whId:d.whId||selWh||whId,capacity:Number(d.capacity)});toast('Rack added','success');await reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Rack')
       )
     ),
     React.createElement('div',{className:'tw'},
@@ -3780,8 +3780,8 @@ function Racks(){
               ),
               React.createElement('td',null,React.createElement('span',{className:'sdot '+(rack.status==='Active'?'active':'inactive')},rack.status)),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:5}},
-                React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(RackForm,{initial:rack,onClose:()=>setModal(null),onSave:d=>{rackSvc.update(rack.id,{...d,capacity:Number(d.capacity)});toast('Updated','success');reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'edit',s:13})),
-                React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Rack',text:'Delete "'+rack.code+'"?',onCancel:()=>setModal(null),onOk:()=>{rackSvc.delete(rack.id);toast('Deleted','success');reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'trash',s:13}))
+                React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(RackForm,{initial:rack,onClose:()=>setModal(null),onSave:async d=>{await rackSvc.update(rack.id,{...d,capacity:Number(d.capacity)});toast('Updated','success');await reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'edit',s:13})),
+                React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Rack',text:'Delete "'+rack.code+'"?',onCancel:()=>setModal(null),onOk:async()=>{await rackSvc.delete(rack.id);toast('Deleted','success');await reloadRacks();setModal(null);}}))},React.createElement(Ic,{n:'trash',s:13}))
               ))
             ))
         )
@@ -3836,8 +3836,8 @@ function Suppliers(){
       React.createElement('div',{className:'ph'},
         React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'🏢 ',sup.name),React.createElement('p',null,'Supplier Detail & Transaction History')),
         React.createElement('div',{className:'ph-r'},
-          React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>setModal(React.createElement(SupForm,{initial:sup,onClose:()=>setModal(null),onSave:d=>{supplierSvc.update(sup.id,d);toast('Updated','success');reloadSups();setModal(null);setDetail({...sup,...d});}}))},'✏️ Edit'),
-          React.createElement('button',{className:'btn btn-danger btn-sm',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Supplier',text:'Delete "'+sup.name+'"?',onCancel:()=>setModal(null),onOk:()=>{supplierSvc.delete(sup.id);toast('Deleted','success');reloadSups();setDetail(null);setModal(null);}}))},'🗑️ Delete')
+          React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>setModal(React.createElement(SupForm,{initial:sup,onClose:()=>setModal(null),onSave:async d=>{await supplierSvc.update(sup.id,d);toast('Updated','success');reloadSups();setModal(null);setDetail({...sup,...d});}}))},'✏️ Edit'),
+          React.createElement('button',{className:'btn btn-danger btn-sm',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Supplier',text:'Delete "'+sup.name+'"?',onCancel:()=>setModal(null),onOk:async()=>{await supplierSvc.delete(sup.id);toast('Deleted','success');reloadSups();setDetail(null);setModal(null);}}))},'🗑️ Delete')
         )
       ),
       React.createElement('div',{className:'grid g4',style:{marginBottom:14}},
@@ -3885,7 +3885,7 @@ function Suppliers(){
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Supplier Master'),React.createElement('p',null,String(sups.length)+' suppliers — click any row for details')),
-      React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(SupForm,{onClose:()=>setModal(null),onSave:d=>{supplierSvc.create(d);toast('Supplier added','success');reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Supplier'))
+      React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(SupForm,{onClose:()=>setModal(null),onSave:async d=>{await supplierSvc.create(d);toast('Supplier added','success');await reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Supplier'))
     ),
     React.createElement('div',{className:'tw'},
       React.createElement('table',null,
@@ -3902,8 +3902,8 @@ function Suppliers(){
               React.createElement('td',null,React.createElement(Badge,{c:'blue'},String(supGRVCount),' GRVs')),
               React.createElement('td',null,React.createElement('span',{className:'sdot '+(s.status==='Active'?'active':'inactive')},s.status)),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:5}},
-                React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(SupForm,{initial:s,onClose:()=>setModal(null),onSave:d=>{supplierSvc.update(s.id,d);toast('Updated','success');reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'edit',s:13})),
-                React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Supplier',text:'Delete "'+s.name+'"?',onCancel:()=>setModal(null),onOk:()=>{supplierSvc.delete(s.id);toast('Deleted','success');reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'trash',s:13}))
+                React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(SupForm,{initial:s,onClose:()=>setModal(null),onSave:async d=>{await supplierSvc.update(s.id,d);toast('Updated','success');await reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'edit',s:13})),
+                React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Supplier',text:'Delete "'+s.name+'"?',onCancel:()=>setModal(null),onOk:async()=>{await supplierSvc.delete(s.id);toast('Deleted','success');await reloadSups();setModal(null);}}))},React.createElement(Ic,{n:'trash',s:13}))
               ))
             );
           })
@@ -5871,7 +5871,7 @@ function Users(){
         React.createElement('p',null,'Manage roles and GRV / GIV approval permissions')
       ),
       me?.role==='Super Admin'&&React.createElement('div',{className:'ph-r'},
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(UForm,{onClose:()=>setModal(null),onSave:d=>{userSvc.create(d);toast('User added','success');reload();setModal(null);}}))},
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(UForm,{onClose:()=>setModal(null),onSave:async d=>{await userSvc.create(d);toast('User added','success');reload();setModal(null);}}))},
           React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' + Add User'
         )
       )
@@ -5936,7 +5936,7 @@ function Users(){
               React.createElement('td',null,
                 me?.role==='Super Admin'&&u.id!==me?.id&&React.createElement('div',{style:{display:'flex',gap:5}},
                   React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',title:'Edit',
-                    onClick:()=>setModal(React.createElement(UForm,{initial:u,onClose:()=>setModal(null),onSave:d=>{userSvc.update(u.id,{...d,...(!d.password&&{password:u.password})});toast('Updated','success');reload();setModal(null);}}))},
+                    onClick:()=>setModal(React.createElement(UForm,{initial:u,onClose:()=>setModal(null),onSave:async d=>{await userSvc.update(u.id,{...d,...(!d.password&&{password:u.password})});toast('Updated','success');reload();setModal(null);}}))},
                     React.createElement(Ic,{n:'edit',s:13})
                   ),
                   React.createElement('button',{className:'btn btn-amber btn-sm',style:{fontSize:10,padding:'3px 8px',fontWeight:700},title:'Change Password for '+u.name,
@@ -5944,7 +5944,7 @@ function Users(){
                     'Pwd'
                   ),
                   React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',title:'Delete',
-                    onClick:()=>setModal(React.createElement(Confirm,{title:'Delete User',text:`Delete "${u.name}"?`,onCancel:()=>setModal(null),onOk:()=>{userSvc.delete(u.id);toast('Deleted','success');reload();setModal(null);}}))},
+                    onClick:()=>setModal(React.createElement(Confirm,{title:'Delete User',text:`Delete "${u.name}"?`,onCancel:()=>setModal(null),onOk:async()=>{await userSvc.delete(u.id);toast('Deleted','success');reload();setModal(null);}}))},
                     React.createElement(Ic,{n:'trash',s:13})
                   )
                 )
