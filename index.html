@@ -1001,11 +1001,15 @@ const stockSvc = {
   },
   async setQty(itemId, whId, qty) {
     const safeQty = Math.max(0, qty);
-    // Upsert stock row
-    await sbFetch(`stock?item_id=eq.${itemId}&warehouse_id=eq.${whId}`, {
+    // Use UPSERT — insert if not exists, update if exists
+    // on_conflict must be in the URL for PostgREST to handle properly
+    await sbFetch(`stock?on_conflict=item_id,warehouse_id`, {
       method: 'POST',
-      prefer: 'return=representation,resolution=merge-duplicates',
-      headers: { 'Prefer': 'return=representation,resolution=merge-duplicates', 'on-conflict': 'item_id,warehouse_id' },
+      prefer: 'return=minimal,resolution=merge-duplicates',
+      headers: {
+        'Prefer': 'return=minimal,resolution=merge-duplicates',
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ item_id: itemId, warehouse_id: whId, qty: safeQty }),
     });
     await this.loadAll();
@@ -3441,7 +3445,7 @@ function Items(){
             React.createElement('span',{style:{fontSize:11,color:'var(--txt3)'}},'Click qty to edit opening stock')
           ),
           React.createElement('div',{style:{padding:'4px 0'}},
-            whSvc.getAll().map(wh=>{
+            (isSA ? whSvc.getAll() : whSvc.getAll().filter(w=>w.id===whId)).map(wh=>{
               const whStock=stockSvc.getQty(item.id,wh.id);
               const whItem=itemSvc.getAll(wh.id).find(i=>i.id===item.id||(i.code===item.code&&i.name===item.name));
               const isHome=wh.id===item.whId;
