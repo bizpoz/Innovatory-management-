@@ -686,7 +686,7 @@ const settSvc = {
 };
 
 // ── Map DB row → App object ──
-const mapWH  = r => r && ({ id: r.id, name: r.name, code: r.code, location: r.location, status: r.status, groupId: r.group_id||null, createdAt: r.created_at });
+const mapWH  = r => r && ({ id: r.id, name: r.name, code: r.code, location: r.location, status: r.status, createdAt: r.created_at });
 const mapRack = r => r && ({ id: r.id, whId: r.warehouse_id, code: r.code, name: r.name, category: r.category, description: r.description, capacity: r.capacity, status: r.status, createdAt: r.created_at });
 const mapItem = r => r && ({ id: r.id, whId: r.warehouse_id, rackId: r.rack_id, code: r.code, name: r.name, description: r.description, category: r.category, subCategory: r.sub_category||null, unit: r.unit, costPrice: Number(r.cost_price), minStock: r.min_stock, status: r.status, openingQty: r.opening_qty, isAsset: r.is_asset, assetCode: r.asset_code, photo: r.photo_url, createdAt: r.created_at });
 const mapSup  = r => r && ({ id: r.id, name: r.name, contact: r.contact, email: r.email, gst: r.gst_no, address: r.address, status: r.status, createdAt: r.created_at });
@@ -756,7 +756,13 @@ const whSvc = {
   async loadAll() {
     try {
       const rows = await sb.select('warehouses', '', 'order=code.asc');
-      this._cache = rows.map(mapWH);
+      const mapped = rows.map(mapWH);
+      // Merge groupId from localStorage (WH grouping is client-side only)
+      const local = db.g('warehouses') || [];
+      this._cache = mapped.map(w => {
+        const localWH = local.find(lw => lw.id === w.id);
+        return { ...w, groupId: localWH?.groupId || null };
+      });
       db.s('warehouses', this._cache);
     } catch { this._cache = db.g('warehouses') || SEED.warehouses; }
     return this._cache;
@@ -764,11 +770,11 @@ const whSvc = {
   getAll() { return this._cache || db.g('warehouses') || SEED.warehouses; },
   getById(id) { return this.getAll().find(w => w.id === id); },
   async create(d) {
-    const row = await sb.insert('warehouses', { name: d.name, code: d.code, location: d.location, status: d.status || 'Active', parent_id: d.parentId||null });
+    const row = await sb.insert('warehouses', { name: d.name, code: d.code, location: d.location, status: d.status || 'Active' });
     this._cache = null; await this.loadAll(); return mapWH(row);
   },
   async update(id, d) {
-    await sb.update('warehouses', `id=eq.${id}`, { name: d.name, code: d.code, location: d.location, status: d.status, parent_id: d.parentId||null });
+    await sb.update('warehouses', `id=eq.${id}`, { name: d.name, code: d.code, location: d.location, status: d.status });
     this._cache = null; await this.loadAll();
   },
   async delete(id) {
