@@ -546,7 +546,7 @@ const SEED={
     {id:'u4',username:'store2',name:'WH2 Store Incharge',password:'store456',role:'Store',whId:'wh2',department:'Store',status:'Active',canApproveGRV:false,canApproveGIV:false,createdAt:ts()},
     {id:'u5',username:'mgr2',name:'WH2 Manager',password:'mgr456',role:'Manager',whId:'wh2',department:'Management',status:'Active',canApproveGRV:true,canApproveGIV:true,createdAt:ts()},
   ],
-  settings:{companyName:'BIZPOZ',subtitle:'Multi-Warehouse IMS',currencySymbol:'QR',address:'',phone:'',email:'',taxNo:'',grvPrefix:'PO',givPrefix:'GIN',trnPrefix:'TRN',conPrefix:'CON',proPrefix:'PRO',mrPrefix:'MR',dmgPrefix:'DMG',fiscalYear:'2024-25'},
+  settings:{companyName:'BIZPOZ',subtitle:'Multi-Warehouse IMS',currencySymbol:'QR',address:'',phone:'',email:'',taxNo:'',companyLogo:'',grvPrefix:'PO',givPrefix:'GIN',trnPrefix:'TRN',conPrefix:'CON',proPrefix:'PRO',mrPrefix:'MR',dmgPrefix:'DMG',fiscalYear:'2024-25'},
   suppliers:[
     {id:'sup1',name:'ABC Engineering Pvt. Ltd.',contact:'9876543210',email:'abc@eng.com',status:'Active',createdAt:ts()},
     {id:'sup2',name:'Techno Solutions',contact:'9876543211',email:'techno@sol.com',status:'Active',createdAt:ts()},
@@ -663,6 +663,11 @@ const settSvc = {
           mrPrefix:       rows[0].mr_prefix,
           dmgPrefix:      rows[0].dmg_prefix,
           fiscalYear:     rows[0].fiscal_year,
+          address:        rows[0].address||'',
+          phone:          rows[0].phone||'',
+          email:          rows[0].email||'',
+          taxNo:          rows[0].tax_no||'',
+          companyLogo:    rows[0].company_logo||'',
         };
       }
       return this._cache;
@@ -687,6 +692,11 @@ const settSvc = {
         mr_prefix:       d.mrPrefix,
         dmg_prefix:      d.dmgPrefix,
         fiscal_year:     d.fiscalYear,
+        address:         d.address||null,
+        phone:           d.phone||null,
+        email:           d.email||null,
+        tax_no:          d.taxNo||null,
+        company_logo:    d.companyLogo||null,
       });
     } catch (e) { console.warn('Settings sync failed:', e.message); }
   },
@@ -1605,7 +1615,7 @@ function Auth(){
     React.createElement('div',{className:'auth-left'},
       React.createElement('div',{className:'auth-brand'},
         React.createElement('img',{src:BIZPOZ_LOGO,alt:'BIZPOZ',style:{width:80,height:80,borderRadius:16,marginBottom:12,boxShadow:'0 4px 24px rgba(0,0,0,.3)'}}),
-        React.createElement('div',{className:'auth-brand-name'},sett.companyName||'BIZPOZ'),
+        React.createElement('div',{className:'auth-brand-name'},sett.companyName||''),
         React.createElement('div',{className:'auth-brand-sub'},'Multi-Warehouse IMS')
       ),
       React.createElement('div',{className:'auth-features'},
@@ -1684,7 +1694,7 @@ function Sidebar(){
     React.createElement('div',{className:'sidebar-brand'},
       React.createElement('div',{className:'brand-icon'},'🏪'),
       React.createElement('div',null,
-        React.createElement('div',{className:'brand-name'},sett.companyName||'BIZPOZ'),
+        React.createElement('div',{className:'brand-name'},sett.companyName||''),
         React.createElement('div',{className:'brand-sub'},isSA?'Super Admin — All Warehouses':'Multi-Warehouse IMS')
       )
     ),
@@ -4032,9 +4042,9 @@ function GRVEntry(){
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
-          React.createElement('img',{src:BIZPOZ_LOGO,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover'}}),
+          settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover'}}),
           React.createElement('div',null,
-            React.createElement('div',{style:{fontSize:14,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||'BIZPOZ'),
+            React.createElement('div',{style:{fontSize:14,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||''),
             sett.subtitle&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',letterSpacing:'.5px'}},(sett.subtitle||'')),
             sett.address&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:2}},sett.address),
             sett.taxNo&&React.createElement('div',{style:{fontSize:10,color:'var(--txt)',fontWeight:700,marginTop:2}},'TAX REG # '+(sett.taxNo||''))
@@ -4044,7 +4054,9 @@ function GRVEntry(){
           React.createElement('div',{className:'voucher-title'},'Purchase Order (PO)'),
           React.createElement('div',{className:'voucher-no',style:{marginTop:4}},viewGrv.grvNo),
           React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewGrv.date)),
-          React.createElement(WhBadge,{whId:viewGrv.whId})
+          React.createElement(WhBadge,{whId:viewGrv.whId}),
+          React.createElement('div',{style:{fontSize:11,color:'var(--txt2)',marginTop:3,fontWeight:600}},whSvc.getById(viewGrv.whId)?.name||''),
+          whSvc.getById(viewGrv.whId)?.location&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:1}},whSvc.getById(viewGrv.whId).location)
         )
       ),
       React.createElement('div',{className:'voucher-meta'},
@@ -4275,11 +4287,12 @@ function QuickSupplierForm({onSave,onClose}){
 // ── Voucher Letterhead Component (used in all printable vouchers) ──
 function VoucherLetterhead({title,vNo,date,whId,status,color}){
   const sett=settSvc.get();
+  const wh=whSvc.getById(whId);
   return React.createElement('div',{className:'voucher-head'},
     React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
-      React.createElement('img',{src:BIZPOZ_LOGO,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover',flexShrink:0}}),
+      sett.companyLogo&&React.createElement('img',{src:sett.companyLogo,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover',flexShrink:0}}),
       React.createElement('div',null,
-        React.createElement('div',{style:{fontSize:15,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||'BIZPOZ'),
+        React.createElement('div',{style:{fontSize:15,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||''),
         sett.subtitle&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',letterSpacing:'.4px',marginTop:1}},(sett.subtitle||'')),
         sett.address&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:3}},sett.address),
         (sett.phone||sett.email)&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:1}},(sett.phone||'')+(sett.email?' | '+sett.email:'')),
@@ -4291,6 +4304,8 @@ function VoucherLetterhead({title,vNo,date,whId,status,color}){
       React.createElement('div',{className:'voucher-no',style:{marginTop:4,color:color||'var(--navy)'}},vNo||''),
       React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(date)),
       React.createElement(WhBadge,{whId}),
+      wh&&React.createElement('div',{style:{fontSize:11,fontWeight:700,color:'var(--navy)',marginTop:3}},wh.name),
+      wh?.location&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:1}},wh.location),
       status&&React.createElement('div',{style:{marginTop:4}},
         React.createElement('span',{style:{background:status==='Approved'?'var(--green-light)':status==='Rejected'?'var(--red-light)':'var(--amber-light)',color:status==='Approved'?'var(--green)':status==='Rejected'?'var(--red)':'var(--amber)',padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:700}},status)
       )
@@ -4371,9 +4386,9 @@ function GIVEntry(){
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
-              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'',style:{width:52,height:52,borderRadius:7,objectFit:'cover'}}),
               React.createElement('div',null,
-                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||''),
                 settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
                 settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
               )
@@ -4604,9 +4619,9 @@ function Consumption(){
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
-              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'',style:{width:52,height:52,borderRadius:7,objectFit:'cover'}}),
               React.createElement('div',null,
-                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||''),
                 settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
                 settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
               )
@@ -4825,9 +4840,9 @@ function Production(){
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
-              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'',style:{width:52,height:52,borderRadius:7,objectFit:'cover'}}),
               React.createElement('div',null,
-                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||''),
                 settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
                 settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
               )
@@ -5095,9 +5110,9 @@ function MaterialRequest(){
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',null,
           React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
-              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'',style:{width:52,height:52,borderRadius:7,objectFit:'cover'}}),
               React.createElement('div',null,
-                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||''),
                 settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
                 settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
               )
@@ -5331,9 +5346,9 @@ function DamagedProducts(){
         React.createElement('div',{className:'voucher-head'},
           React.createElement('div',null,
             React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
-              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              settSvc.get().companyLogo&&React.createElement('img',{src:settSvc.get().companyLogo,alt:'',style:{width:52,height:52,borderRadius:7,objectFit:'cover'}}),
               React.createElement('div',null,
-                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||''),
                 settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
                 settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
               )
@@ -6184,6 +6199,7 @@ function Approvals(){
       '.doc-no{display:inline-block;font-size:14px;font-weight:700;background:#f0f4ff;border:1px solid #c7d2fe;padding:4px 14px;border-radius:20px;color:#1a2744;margin-bottom:5px}'+
       '.doc-date{font-size:11px;color:#666;margin-bottom:4px}'+
       '.wh-badge{display:inline-block;font-size:10px;font-weight:700;background:#1a2744;color:#fff;padding:3px 10px;border-radius:20px;margin-top:3px}'+
+      '.wh-block{margin-top:6px;text-align:right}.wh-name{font-size:13px;font-weight:800;color:#1a2744}.wh-loc{font-size:10px;color:#555;margin-top:1px}.wh-code{display:inline-block;font-size:10px;font-weight:700;background:#1a2744;color:#fff;padding:2px 8px;border-radius:20px;margin-top:3px}'+
       '.status-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-weight:bold;font-size:11px;margin-top:4px}'+
       '.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8faff;padding:10px;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:14px}'+
       '.mf .l{color:#888;font-size:9px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}'+
@@ -6203,20 +6219,20 @@ function Approvals(){
       '</style></head><body>'+
       '<div class="letterhead">'+
         '<div class="lh-left">'+
-          '<img class="lh-logo" src="'+BIZPOZ_LOGO+'" alt="logo"/>'+
+          (sett2.companyLogo?'<img class="lh-logo" src="'+sett2.companyLogo+'" alt="logo"/>':'')+
           '<div>'+
             '<div class="co-name">'+sett2.companyName+'</div>'+
-            '<div class="co-sub">'+(sett2.subtitle||'Inventory Management')+'</div>'+
+            (sett2.subtitle?'<div class="co-sub">'+sett2.subtitle+'</div>':'')+
             (sett2.address?'<div class="co-addr">'+sett2.address+'</div>':'')+
-            ((sett2.phone||sett2.email)?'<div class="co-addr">'+(sett2.phone?'Tel: '+sett2.phone:'')+(sett2.email?' | '+sett2.email:'')+'</div>':'')+
+            ((sett2.phone||sett2.email)?'<div class="co-addr">'+(sett2.phone?'Tel: '+sett2.phone:'')+(sett2.email?' &nbsp;|&nbsp; Email: '+sett2.email:'')+'</div>':'')+
             (sett2.taxNo?'<div class="co-tax">TAX REG # '+sett2.taxNo+'</div>':'')+
           '</div>'+
         '</div>'+
         '<div class="lh-right">'+
           '<div class="doc-name">'+TYPE_LABELS[type]+'</div>'+
-          '<div class="doc-no">'+vNo+'</div><br>'+
+          '<div class="doc-no">'+vNo+'</div>'+
           '<div class="doc-date">Date: '+fmtDate(v.date)+'</div>'+
-          (wh2?'<div class="wh-badge">'+wh2.code+' — '+wh2.name+'</div><br>':'')+
+          (wh2?'<div class="wh-block"><div class="wh-name">'+wh2.name+'</div>'+(wh2.location?'<div class="wh-loc">'+wh2.location+'</div>':'')+'<div class="wh-code">'+wh2.code+'</div></div>':'')+
           '<span class="status-badge" style="background:'+(v.status==='Approved'?'#d1fae5':v.status==='Rejected'?'#fee2e2':'#fef3c7')+';color:'+(v.status==='Approved'?'#065f46':v.status==='Rejected'?'#991b1b':'#92400e')+'">'+v.status+'</span>'+
         '</div>'+
       '</div>'+
@@ -6624,6 +6640,28 @@ function Settings(){
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Currency Symbol'),React.createElement('input',{className:'fi',value:s.currencySymbol||'',onChange:e=>sf('currencySymbol',e.target.value),placeholder:'QR'})),
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+        ),
+        React.createElement('div',{className:'fg',style:{marginBottom:10}},
+          React.createElement('label',{className:'flbl'},'Company Logo (shown on all vouchers & documents)'),
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12}},
+            s.companyLogo&&React.createElement('img',{src:s.companyLogo,alt:'logo',style:{width:64,height:64,borderRadius:8,objectFit:'cover',border:'1px solid var(--border2)'}}),
+            React.createElement('div',null,
+              React.createElement('label',{className:'btn btn-outline btn-sm',style:{cursor:'pointer'}},
+                React.createElement('input',{type:'file',accept:'image/*',style:{display:'none'},
+                  onChange:e=>{
+                    const file=e.target.files[0];if(!file)return;
+                    if(file.size>500000){alert('Image must be under 500KB');return;}
+                    const reader=new FileReader();
+                    reader.onload=ev=>sf('companyLogo',ev.target.result);
+                    reader.readAsDataURL(file);
+                  }
+                }),
+                s.companyLogo?'Change Logo':'Upload Logo'
+              ),
+              s.companyLogo&&React.createElement('button',{className:'btn btn-danger btn-sm',style:{marginLeft:8},onClick:()=>sf('companyLogo','')},'Remove'),
+              React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:4}},'PNG/JPG, max 500KB. This replaces BIZPOZ branding on all printed documents.')
+            )
+          )
         ),
         React.createElement('div',{className:'frow'},
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Address (shown on vouchers)'),React.createElement('input',{className:'fi',value:s.address||'',onChange:e=>sf('address',e.target.value),placeholder:'Street, City, Country'})),
