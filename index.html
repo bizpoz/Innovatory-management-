@@ -901,49 +901,40 @@ const itemSvc = {
     const homeWhId = d.whId;
     const allWHs = whSvc.getAll();
 
-    // Insert the item in the home warehouse
-    let row;
-    try {
-      row = await sb.insert('items', {
-        warehouse_id: homeWhId, rack_id: d.rackId || null, code: d.code, name: d.name,
-        description: d.description, category: d.category, unit: d.unit,
-        cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
-        status: d.status || 'Active', opening_qty: Number(d.openingQty) || 0, sub_category: d.subCategory||null,
-        is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
-      });
-    } catch(e) {
-      if(e.message && e.message.includes('duplicate key')) {
-        throw new Error('Item code "'+d.code+'" already exists in this warehouse. Please use a different code.');
-      }
-      throw e;
-    }
+    // ── Helper: build item payload ──
+    const itemPayload = (whId, openingQty) => ({
+      warehouse_id: whId, rack_id: (whId===homeWhId ? d.rackId||null : null),
+      code: d.code, name: d.name, description: d.description, category: d.category,
+      unit: d.unit, cost_price: Number(d.costPrice)||0, min_stock: Number(d.minStock)||0,
+      status: d.status||'Active', opening_qty: Number(openingQty)||0,
+      sub_category: d.subCategory||null, is_asset: !!d.isAsset,
+      asset_code: d.assetCode||null, photo_url: d.photo||null,
+    });
 
-    // Set opening stock for home warehouse
+    // ── Step 1: Load ALL existing items with this code across all warehouses ──
+    const codeFilter = encodeURIComponent(d.code);
+    const existingRes = await fetch(
+      `${SB_URL}/rest/v1/items?code=eq.${codeFilter}&select=id,warehouse_id`,
+      { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}` } }
+    );
+    const existingItems = existingRes.ok ? await existingRes.json() : [];
+    const existingWhIds = new Set(existingItems.map(i => i.warehouse_id));
+
+    // ── Step 2: Insert home warehouse item (must not already exist) ──
+    if (existingWhIds.has(homeWhId)) {
+      throw new Error('Item code "'+d.code+'" already exists in this warehouse. Use a different code.');
+    }
+    const row = await sb.insert('items', itemPayload(homeWhId, d.openingQty));
     if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, homeWhId, Number(d.openingQty));
 
-    // Auto-create the same item in every OTHER warehouse with 0 stock
-    const otherWHs = allWHs.filter(w => w.id !== homeWhId);
+    // ── Step 3: Insert in other warehouses ONLY if code doesn't exist there yet ──
+    const otherWHs = allWHs.filter(w => w.id !== homeWhId && !existingWhIds.has(w.id));
     for (const wh of otherWHs) {
       try {
-        // Check if item with same code already exists in this warehouse
-        const existing = await sb.select('items', `warehouse_id=eq.${wh.id}&code=eq.${encodeURIComponent(d.code)}&limit=1`);
-        if (existing && existing.length > 0) {
-          // Already exists — just ensure a stock entry exists with current qty
-          await stockSvc.setQty(existing[0].id, wh.id, stockSvc.getQty(existing[0].id, wh.id));
-          continue;
-        }
-        const copy = await sb.insert('items', {
-          warehouse_id: wh.id, rack_id: null, code: d.code, name: d.name,
-          description: d.description, category: d.category, unit: d.unit,
-          cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
-          status: d.status || 'Active', opening_qty: 0, sub_category: d.subCategory||null,
-          is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
-        });
-        // Stock entry with 0 qty so it shows in stock view
+        const copy = await sb.insert('items', itemPayload(wh.id, 0));
         await stockSvc.setQty(copy.id, wh.id, 0);
       } catch(e) {
-        // Skip silently — item likely already exists
-        console.warn(`Skipped auto-create in ${wh.name}: ${e.message}`);
+        console.warn('Auto-create skipped for', wh.name, ':', e.message);
       }
     }
 
