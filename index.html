@@ -688,7 +688,7 @@ const settSvc = {
 // ── Map DB row → App object ──
 const mapWH  = r => r && ({ id: r.id, name: r.name, code: r.code, location: r.location, status: r.status, groupId: r.group_id||null, createdAt: r.created_at });
 const mapRack = r => r && ({ id: r.id, whId: r.warehouse_id, code: r.code, name: r.name, category: r.category, description: r.description, capacity: r.capacity, status: r.status, createdAt: r.created_at });
-const mapItem = r => r && ({ id: r.id, whId: r.warehouse_id, rackId: r.rack_id, code: r.code, name: r.name, description: r.description, category: r.category, unit: r.unit, costPrice: Number(r.cost_price), minStock: r.min_stock, status: r.status, openingQty: r.opening_qty, isAsset: r.is_asset, assetCode: r.asset_code, photo: r.photo_url, createdAt: r.created_at });
+const mapItem = r => r && ({ id: r.id, whId: r.warehouse_id, rackId: r.rack_id, code: r.code, name: r.name, description: r.description, category: r.category, subCategory: r.sub_category||null, unit: r.unit, costPrice: Number(r.cost_price), minStock: r.min_stock, status: r.status, openingQty: r.opening_qty, isAsset: r.is_asset, assetCode: r.asset_code, photo: r.photo_url, createdAt: r.created_at });
 const mapSup  = r => r && ({ id: r.id, name: r.name, contact: r.contact, email: r.email, gst: r.gst_no, address: r.address, status: r.status, createdAt: r.created_at });
 const mapUser = r => r && ({ id: r.id, username: r.username, name: r.name, password: r.password, role: r.role, whId: r.warehouse_id, department: r.department, status: r.status, canApproveGRV: r.can_approve_grv, canApproveGIV: r.can_approve_giv, pages: r.pages, createdAt: r.created_at });
 const mapStock = r => r && ({ id: r.id, itemId: r.item_id, whId: r.warehouse_id, qty: r.qty, updatedAt: r.updated_at });
@@ -934,7 +934,7 @@ const itemSvc = {
       rack_id: d.rackId || null, code: d.code, name: d.name, description: d.description,
       category: d.category, unit: d.unit, cost_price: Number(d.costPrice) || 0,
       min_stock: Number(d.minStock) || 0, status: d.status,
-      is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
+      is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null, sub_category: d.subCategory||null,
     });
     this._cache = null; await this.loadAll();
   },
@@ -2778,8 +2778,11 @@ function StockTransfer(){
 //  CATEGORY MASTER
 // ════════════════════════════════════════
 function Categories(){
-  const {toast,setModal,isSA,reload}=useCtx();
+  const {toast,setModal,isSA,reload,whId,nav}=useCtx();
   const [cats,setCats]=useState(catSvc.getAll());
+  const [detail,setDetail]=useState(null); // selected category for drill-down
+  const [subFilter,setSubFilter]=useState('');  // sub-category filter in detail
+  const [q,setQ]=useState('');
   const reloadCats=()=>{refreshCATS();setCats(catSvc.getAll());reload();};
 
   const ICONS=['📦','⚙️','⚡','📡','🛡️','🔧','🏭','🔬','💡','🪛','🔩','🏗️','🧪','🔋','📋','🗜️','🪝','💎','🔌','🧲'];
@@ -2791,19 +2794,11 @@ function Categories(){
     {color:'#9333ea',bg:'#faf5ff'},{color:'#059669',bg:'#ecfdf5'},
   ];
 
-  // ── Shared CatForm — used for both category and sub-category ──
   const CatForm=({initial,parentCat,onSave,onClose})=>{
     const isSubCat=!!parentCat;
-    const [f,setF]=useState(initial||{
-      id:'', name:'', short:'',
-      icon: parentCat?.icon||'📦',
-      color: parentCat?.color||'#2563eb',
-      bg:    parentCat?.bg||'#eff6ff',
-      parentId: parentCat?.id||null,
-    });
+    const [f,setF]=useState(initial||{id:'',name:'',short:'',icon:parentCat?.icon||'📦',color:parentCat?.color||'#2563eb',bg:parentCat?.bg||'#eff6ff',parentId:parentCat?.id||null});
     const sf=(k,v)=>setF(p=>({...p,[k]:v}));
     const [err,setErr]=useState({});
-
     const save=()=>{
       const e={};
       if(!f.name)e.name='Required';
@@ -2812,13 +2807,7 @@ function Categories(){
       if(Object.keys(e).length){setErr(e);return;}
       try{onSave(f);}catch(ex){setErr({id:ex.message});}
     };
-
-    const title=initial
-      ? (isSubCat?'Edit Sub-Category':'Edit Category')
-      : (isSubCat?'Add Sub-Category to: '+parentCat.name:'Add New Category');
-
-    return React.createElement(Modal,{title,onClose,size:'sm'},
-      // Preview
+    return React.createElement(Modal,{title:initial?(isSubCat?'Edit Sub-Category':'Edit Category'):(isSubCat?'Add Sub-Category to: '+parentCat.name:'Add New Category'),onClose,size:'sm'},
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:f.bg,borderRadius:'var(--r)',border:'2px solid '+f.color,marginBottom:14}},
         React.createElement('div',{style:{fontSize:24}},f.icon),
         React.createElement('div',null,
@@ -2826,16 +2815,10 @@ function Categories(){
           isSubCat&&parentCat&&React.createElement('div',{style:{fontSize:10,color:f.color,opacity:.7}},parentCat.icon+' '+parentCat.name+' › '+f.short)
         )
       ),
-      // Code + Name row
       React.createElement('div',{className:'frow'},
         React.createElement('div',{className:'fg'},
-          React.createElement('label',{className:'flbl'},'Code *'+(initial?' (⚠️ changes update all items)':' (e.g. MECH)')),
-          React.createElement('input',{
-            className:'fi',value:f.id,
-            onChange:ev=>sf('id',ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8)),
-            placeholder:isSubCat?'e.g. BEAR, PUMP':'e.g. MECH',
-            style:{fontFamily:'var(--mono)',fontWeight:700,letterSpacing:'1px',borderColor:initial?'var(--amber)':''}
-          }),
+          React.createElement('label',{className:'flbl'},'Code *'+(initial?' (⚠️ changing updates all items)':'  (e.g. MECH)')),
+          React.createElement('input',{className:'fi',value:f.id,onChange:ev=>sf('id',ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8)),placeholder:isSubCat?'e.g. BEAR':'e.g. MECH',style:{fontFamily:'var(--mono)',fontWeight:700,letterSpacing:'1px',borderColor:initial?'var(--amber)':''}}),
           err.id&&React.createElement('div',{className:'fe'},err.id)
         ),
         React.createElement('div',{className:'fg'},
@@ -2849,46 +2832,164 @@ function Categories(){
         React.createElement('input',{className:'fi',value:f.short,onChange:ev=>sf('short',ev.target.value),placeholder:'Shown as badge label'}),
         err.short&&React.createElement('div',{className:'fe'},err.short)
       ),
-      // Icon picker
       React.createElement('div',{className:'fg',style:{marginBottom:10}},
         React.createElement('label',{className:'flbl'},'Icon'),
         React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:5}},
           ICONS.map(ico=>React.createElement('div',{key:ico,onClick:()=>sf('icon',ico),
-            style:{width:34,height:34,borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',
-              fontSize:18,cursor:'pointer',
-              background:f.icon===ico?f.color+'22':'var(--off2)',
-              border:'2px solid '+(f.icon===ico?f.color:'transparent')}}
-          ,ico))
+            style:{width:34,height:34,borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,cursor:'pointer',
+              background:f.icon===ico?f.color+'22':'var(--off2)',border:'2px solid '+(f.icon===ico?f.color:'transparent')}},ico))
         )
       ),
-      // Color picker
       React.createElement('div',{className:'fg'},
         React.createElement('label',{className:'flbl'},'Color'),
         React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
           COLORS.map(col=>React.createElement('div',{key:col.color,onClick:()=>{sf('color',col.color);sf('bg',col.bg);},
-            style:{width:28,height:28,borderRadius:'50%',background:col.color,cursor:'pointer',
-              border:f.color===col.color?'3px solid #000':'3px solid transparent',
-              boxShadow:f.color===col.color?'0 0 0 2px #fff inset':'none'}}
-          ))
+            style:{width:28,height:28,borderRadius:'50%',background:col.color,cursor:'pointer',border:f.color===col.color?'3px solid #000':'3px solid transparent',boxShadow:f.color===col.color?'0 0 0 2px #fff inset':'none'}}))
         )
       ),
       null,
       React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}},
         React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel'),
-        React.createElement('button',{className:'btn btn-primary',onClick:save},
-          initial?'Update':'Add '+(isSubCat?'Sub-Category':'Category'))
+        React.createElement('button',{className:'btn btn-primary',onClick:save},initial?'Update':'Add '+(isSubCat?'Sub-Category':'Category'))
       )
     );
   };
 
   const DEFAULT_CAT_IDS=['MECH','ELEC','INST','SAFE','GEN'];
   const rootCats=cats.filter(c=>!c.parentId);
+  const sym=settSvc.get().currencySymbol||'QR';
 
+  // ══════════════════════════════════
+  // DETAIL VIEW — items in category
+  // ══════════════════════════════════
+  if(detail){
+    const cat=detail;
+    const subCats=cats.filter(c=>c.parentId===cat.id);
+    const allItems=itemSvc.getAll(whId);
+
+    // All items in this category (main + all sub-cats)
+    const allCatIds=[cat.id,...subCats.map(sc=>sc.id)];
+    const catItems=allItems.filter(i=>allCatIds.includes(i.category)||allCatIds.includes(i.subCategory));
+
+    // Filter by sub-cat tab and search
+    const filtered=catItems.filter(i=>{
+      const matchSub=!subFilter||(subFilter==='__main'?(i.category===cat.id&&!i.subCategory):i.subCategory===subFilter||i.category===subFilter);
+      const matchQ=!q||i.name.toLowerCase().includes(q.toLowerCase())||(i.code||'').toLowerCase().includes(q.toLowerCase());
+      return matchSub&&matchQ;
+    });
+
+    const totalVal=catItems.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*Number(i.costPrice||0),0);
+    const totalQty=catItems.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId),0);
+    const lowCount=catItems.filter(i=>stockSvc.getQty(i.id,i.whId)<=i.minStock).length;
+
+    return React.createElement('div',null,
+      // Page header
+      React.createElement('div',{className:'ph'},
+        React.createElement('div',{className:'ph-l'},
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+            React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>{setDetail(null);setSubFilter('');setQ('');}},'\u2190 Back'),
+            React.createElement('div',{style:{width:42,height:42,borderRadius:10,background:cat.bg,border:'2px solid '+cat.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}},cat.icon),
+            React.createElement('div',null,
+              React.createElement('h1',{style:{margin:0}},cat.name),
+              React.createElement('p',{style:{margin:0}},String(catItems.length)+' items · '+String(subCats.length)+' sub-categories')
+            )
+          )
+        ),
+        React.createElement('div',{className:'ph-r'},
+          React.createElement('div',{style:{display:'flex',gap:10}},
+            React.createElement('div',{style:{textAlign:'center'}},
+              React.createElement('div',{style:{fontWeight:800,fontSize:18,color:cat.color}},String(totalQty)),
+              React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},'Total Qty')
+            ),
+            React.createElement('div',{style:{textAlign:'center'}},
+              React.createElement('div',{style:{fontWeight:800,fontSize:18,color:'var(--green)'}},sym+' '+fmt(totalVal,0)),
+              React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},'Stock Value')
+            ),
+            lowCount>0&&React.createElement('div',{style:{textAlign:'center'}},
+              React.createElement('div',{style:{fontWeight:800,fontSize:18,color:'var(--red)'}},String(lowCount)),
+              React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},'Low Stock')
+            )
+          )
+        )
+      ),
+
+      // Sub-category tabs
+      (subCats.length>0)&&React.createElement('div',{className:'tabs',style:{marginBottom:0}},
+        React.createElement('div',{className:'tab'+(subFilter===''?' on':''),onClick:()=>setSubFilter('')},'All ('+String(catItems.length)+')'),
+        React.createElement('div',{className:'tab'+(subFilter==='__main'?' on':''),onClick:()=>setSubFilter('__main')},
+          cat.icon+' '+cat.short+' Only ('+String(catItems.filter(i=>i.category===cat.id&&!i.subCategory).length)+')'
+        ),
+        subCats.map(sc=>React.createElement('div',{key:sc.id,className:'tab'+(subFilter===sc.id?' on':''),onClick:()=>setSubFilter(sc.id)},
+          sc.icon+' '+sc.short+' ('+String(catItems.filter(i=>i.subCategory===sc.id||i.category===sc.id).length)+')'
+        ))
+      ),
+
+      // Search bar
+      React.createElement('div',{className:'sb-bar'},
+        React.createElement('div',{className:'si'},
+          React.createElement('div',{className:'si-ico'},React.createElement(Ic,{n:'search',s:13,c:'var(--txt3)'})),
+          React.createElement('input',{placeholder:'Search item name / code...',value:q,onChange:e=>setQ(e.target.value)})
+        )
+      ),
+
+      // Items table
+      React.createElement('div',{className:'tw'},
+        React.createElement('table',null,
+          React.createElement('thead',null,
+            React.createElement('tr',null,
+              ['Photo','Item Name','Code','Sub-Category','Warehouse','Rack','Unit','Stock','Min','Rate','Status'].map(h=>React.createElement('th',{key:h},h))
+            )
+          ),
+          React.createElement('tbody',null,
+            filtered.length===0
+              ? React.createElement('tr',null,React.createElement('td',{colSpan:11},React.createElement('div',{className:'te'},'No items found in this category.')))
+              : filtered.map(item=>{
+                  const qty=stockSvc.getQty(item.id,item.whId);
+                  const low=qty<=item.minStock;
+                  const wh=whSvc.getById(item.whId);
+                  const rack=rackSvc.getAll(null).find(r=>r.id===item.rackId);
+                  const sc=cats.find(c=>c.id===item.subCategory);
+                  return React.createElement('tr',{key:item.id,style:{cursor:'pointer'},onClick:()=>nav('items')},
+                    React.createElement('td',null,
+                      item.photo
+                        ? React.createElement('img',{src:item.photo,style:{width:32,height:32,borderRadius:6,objectFit:'cover'}})
+                        : React.createElement('div',{style:{width:32,height:32,borderRadius:6,background:cat.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}},cat.icon)
+                    ),
+                    React.createElement('td',null,
+                      React.createElement('div',{style:{fontWeight:600}},item.name),
+                      item.isAsset&&React.createElement('div',{style:{fontSize:10,color:'#c2410c',fontWeight:600}},'🏷️ ',item.assetCode)
+                    ),
+                    React.createElement('td',null,React.createElement('span',{style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:600,color:'var(--blue)'}},item.code)),
+                    React.createElement('td',null,sc
+                      ? React.createElement('span',{style:{background:sc.bg||cat.bg,color:sc.color||cat.color,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},sc.icon+' '+sc.short)
+                      : React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},'—')
+                    ),
+                    React.createElement('td',null,React.createElement(WhBadge,{whId:item.whId})),
+                    React.createElement('td',null,React.createElement('span',{style:{fontFamily:'var(--mono)',fontSize:11,color:'var(--txt2)'}},rack?.code||'—')),
+                    React.createElement('td',null,item.unit),
+                    React.createElement('td',null,React.createElement('span',{style:{fontWeight:800,fontSize:14,color:low?'var(--red)':'var(--green)'}},String(qty)),
+                      low&&React.createElement('div',{style:{fontSize:9,color:'var(--red)',fontWeight:600}},'LOW')
+                    ),
+                    React.createElement('td',null,String(item.minStock)),
+                    React.createElement('td',null,sym+' '+fmt(item.costPrice,2)),
+                    React.createElement('td',null,React.createElement('span',{className:'sdot '+(item.status==='Active'?'active':'inactive')},item.status))
+                  );
+                })
+          )
+        )
+      ),
+      React.createElement('div',{style:{fontSize:11,color:'var(--txt3)',textAlign:'center',marginTop:6}},'💡 Click any item row to go to Item Master')
+    );
+  }
+
+  // ══════════════════════════════════
+  // MAIN LIST VIEW — category cards
+  // ══════════════════════════════════
   return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},
         React.createElement('h1',null,'Category Master'),
-        React.createElement('p',null,String(rootCats.length)+' categories — '+String(cats.filter(c=>!!c.parentId).length)+' sub-categories')
+        React.createElement('p',null,String(rootCats.length)+' categories · '+String(cats.filter(c=>!!c.parentId).length)+' sub-categories · click a card to see items')
       ),
       isSA&&React.createElement('div',{className:'ph-r'},
         React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(CatForm,{
@@ -2901,13 +3002,17 @@ function Categories(){
     React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}},
       rootCats.map(cat=>{
         const subCats=cats.filter(c=>c.parentId===cat.id);
-        const allCatItems=(catId)=>itemSvc.getAll(null).filter(i=>i.category===catId);
-        const catItems=allCatItems(cat.id);
-        const totalItems=catItems.length + subCats.reduce((s,sc)=>s+allCatItems(sc.id).length,0);
+        const allCatIds=[cat.id,...subCats.map(sc=>sc.id)];
+        const allItems=itemSvc.getAll(whId);
+        const catItems=allItems.filter(i=>allCatIds.includes(i.category)||allCatIds.includes(i.subCategory));
+        const totalVal=catItems.reduce((s,i)=>s+stockSvc.getQty(i.id,i.whId)*Number(i.costPrice||0),0);
+        const lowCount=catItems.filter(i=>stockSvc.getQty(i.id,i.whId)<=i.minStock).length;
 
-        return React.createElement('div',{key:cat.id,className:'card',style:{borderTop:'4px solid '+cat.color,padding:0,overflow:'hidden'}},
-
-          // ── Category Header ──
+        return React.createElement('div',{key:cat.id,className:'card',
+          style:{borderTop:'4px solid '+cat.color,padding:0,overflow:'hidden',cursor:'pointer',transition:'box-shadow .15s'},
+          onClick:()=>{setDetail(cat);setSubFilter('');setQ('');}
+        },
+          // Header
           React.createElement('div',{style:{padding:'14px 14px 10px',background:cat.bg+'88'}},
             React.createElement('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
               React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
@@ -2917,80 +3022,88 @@ function Categories(){
                   React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:cat.color,opacity:.6,letterSpacing:'1px'}},'ID: '+cat.id)
                 )
               ),
-              isSA&&React.createElement('div',{style:{display:'flex',gap:4}},
+              isSA&&React.createElement('div',{style:{display:'flex',gap:4},onClick:e=>e.stopPropagation()},
                 React.createElement('button',{className:'btn btn-outline btn-icon btn-sm',title:'Edit',
                   onClick:()=>setModal(React.createElement(CatForm,{initial:cat,onClose:()=>setModal(null),
                     onSave:(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
-                  }))
-                },React.createElement(Ic,{n:'edit',s:12})),
+                  }))},React.createElement(Ic,{n:'edit',s:12})),
                 !DEFAULT_CAT_IDS.includes(cat.id)&&React.createElement('button',{className:'btn btn-danger btn-icon btn-sm',title:'Delete',
                   onClick:()=>{
-                    if(totalItems>0){toast('Cannot delete — '+totalItems+' items use this category','error');return;}
-                    if(subCats.length>0){toast('Delete all sub-categories first','error');return;}
+                    if(catItems.length>0){toast('Cannot delete — '+catItems.length+' items use this category','error');return;}
+                    if(subCats.length>0){toast('Delete sub-categories first','error');return;}
                     if(window.confirm('Delete "'+cat.name+'"?')){catSvc.delete(cat.id);toast('Deleted','success');reloadCats();}
-                  }
-                },React.createElement(Ic,{n:'trash',s:12}))
+                  }},React.createElement(Ic,{n:'trash',s:12}))
               )
             ),
-            React.createElement('div',{style:{marginTop:8,fontSize:12,color:cat.color}},
-              React.createElement('strong',null,String(totalItems)),
-              React.createElement('span',{style:{opacity:.7}},' total items · '+String(subCats.length)+' sub-categories')
+            // Stats row
+            React.createElement('div',{style:{display:'flex',gap:16,marginTop:10,fontSize:12}},
+              React.createElement('div',null,
+                React.createElement('span',{style:{fontWeight:800,fontSize:18,color:cat.color}},String(catItems.length)),
+                React.createElement('span',{style:{color:'var(--txt3)',marginLeft:3}},catItems.length===1?'item':'items')
+              ),
+              React.createElement('div',null,
+                React.createElement('span',{style:{fontWeight:700,color:'var(--green)'}},sym+' '+fmt(totalVal,0)),
+                React.createElement('span',{style:{color:'var(--txt3)',marginLeft:3}},'value')
+              ),
+              lowCount>0&&React.createElement('div',null,
+                React.createElement('span',{style:{fontWeight:700,color:'var(--red)'}},String(lowCount)),
+                React.createElement('span',{style:{color:'var(--txt3)',marginLeft:3}},'low stock ⚠️')
+              )
             )
           ),
 
-          // ── Sub-Categories ──
-          React.createElement('div',{style:{padding:'10px 14px'}},
+          // Sub-categories section
+          React.createElement('div',{style:{padding:'10px 14px'},onClick:e=>e.stopPropagation()},
             subCats.length===0
               ? React.createElement('div',{style:{fontSize:11,color:'var(--txt3)',fontStyle:'italic',marginBottom:8}},'No sub-categories yet.')
-              : React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:6,marginBottom:10}},
+              : React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:5,marginBottom:10}},
                   subCats.map(sc=>{
-                    const scItems=allCatItems(sc.id);
+                    const scCount=allItems.filter(i=>i.subCategory===sc.id||i.category===sc.id).length;
                     return React.createElement('div',{key:sc.id,
-                      style:{display:'flex',alignItems:'center',justifyContent:'space-between',
-                        padding:'6px 10px',borderRadius:8,
-                        background:sc.bg||cat.bg,border:'1px solid '+(sc.color||cat.color)+'33'}},
-                      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:7}},
-                        React.createElement('span',{style:{fontSize:16}},sc.icon),
-                        React.createElement('div',null,
-                          React.createElement('div',{style:{fontWeight:600,fontSize:12,color:sc.color||cat.color}},sc.name),
-                          React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},
-                            sc.id+' · '+String(scItems.length)+' items')
-                        )
+                      style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 8px',borderRadius:7,
+                        background:sc.bg||cat.bg,border:'1px solid '+(sc.color||cat.color)+'33',cursor:'pointer'},
+                      onClick:()=>{setDetail(cat);setSubFilter(sc.id);setQ('');}},
+                      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:6}},
+                        React.createElement('span',{style:{fontSize:15}},sc.icon),
+                        React.createElement('span',{style:{fontWeight:600,fontSize:12,color:sc.color||cat.color}},sc.name)
                       ),
-                      isSA&&React.createElement('div',{style:{display:'flex',gap:4}},
-                        React.createElement('button',{className:'btn btn-outline btn-xs',
-                          onClick:()=>setModal(React.createElement(CatForm,{initial:sc,parentCat:cat,
-                            onClose:()=>setModal(null),
-                            onSave:(d)=>{catSvc.update(sc.id,d);toast('Updated','success');reloadCats();setModal(null);}
-                          }))
-                        },React.createElement(Ic,{n:'edit',s:11})),
-                        React.createElement('button',{className:'btn btn-danger btn-xs',
-                          onClick:()=>{
-                            if(scItems.length>0){toast('Cannot delete — '+scItems.length+' items use this sub-category','error');return;}
-                            if(window.confirm('Delete sub-category "'+sc.name+'"?')){catSvc.delete(sc.id);toast('Deleted','success');reloadCats();}
-                          }
-                        },React.createElement(Ic,{n:'trash',s:11}))
+                      React.createElement('div',{style:{display:'flex',alignItems:'center',gap:6}},
+                        React.createElement('span',{style:{fontSize:11,color:'var(--txt3)'}},String(scCount)+' items'),
+                        isSA&&React.createElement('div',{style:{display:'flex',gap:3}},
+                          React.createElement('button',{className:'btn btn-outline btn-xs',
+                            onClick:e=>{e.stopPropagation();setModal(React.createElement(CatForm,{initial:sc,parentCat:cat,onClose:()=>setModal(null),
+                              onSave:(d)=>{catSvc.update(sc.id,d);toast('Updated','success');reloadCats();setModal(null);}
+                            }))}},React.createElement(Ic,{n:'edit',s:10})),
+                          React.createElement('button',{className:'btn btn-danger btn-xs',
+                            onClick:e=>{e.stopPropagation();
+                              if(scCount>0){toast('Cannot delete — '+scCount+' items use this','error');return;}
+                              if(window.confirm('Delete "'+sc.name+'"?')){catSvc.delete(sc.id);toast('Deleted','success');reloadCats();}
+                            }},React.createElement(Ic,{n:'trash',s:10}))
+                        )
                       )
                     );
                   })
                 ),
-
-            // ── Add Sub-Category Button ──
             isSA&&React.createElement('button',{
               className:'btn btn-outline btn-sm',
               style:{width:'100%',borderStyle:'dashed',color:cat.color,borderColor:cat.color+'66'},
-              onClick:()=>setModal(React.createElement(CatForm,{
-                parentCat:cat,
-                onClose:()=>setModal(null),
-                onSave:(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added to '+cat.name,'success');reloadCats();setModal(null);}
-              }))
-            },React.createElement(Ic,{n:'plus',s:12}),' Add Sub-Category to ',cat.short)
+              onClick:e=>{e.stopPropagation();setModal(React.createElement(CatForm,{
+                parentCat:cat,onClose:()=>setModal(null),
+                onSave:(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added','success');reloadCats();setModal(null);}
+              }));}
+            },React.createElement(Ic,{n:'plus',s:12}),' Add Sub-Category to ',cat.short),
+
+            // View items hint
+            React.createElement('div',{style:{marginTop:8,paddingTop:8,borderTop:'1px solid var(--border)',fontSize:11,color:cat.color,fontWeight:600,textAlign:'center'}},
+              '👆 Click card header to see all ',String(catItems.length),' items'
+            )
           )
         );
       })
     )
   );
 }
+
 
 
 
