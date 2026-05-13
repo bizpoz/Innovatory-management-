@@ -412,6 +412,9 @@ const db={
 };
 
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+// Global submit guard — prevents duplicate item creation from rapid clicks
+// Cannot be reset by React re-renders unlike useState
+let _itemSubmitting=false;
 const ts=()=>new Date().toISOString();
 const today=()=>new Date().toISOString().split('T')[0];
 const fmt=(n,d=2)=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -901,7 +904,11 @@ const itemSvc = {
     return `${catId}-${String(n).padStart(4,'0')}`;
   },
   async create(d) {
+    // Hard guard against concurrent/duplicate submissions
+    if(_itemSubmitting) throw new Error('Already saving — please wait.');
+    _itemSubmitting=true;
     const homeWhId = d.whId;
+    try {
     const allWHs = whSvc.getAll();
 
     // ── Helper: build item payload ──
@@ -927,6 +934,16 @@ const itemSvc = {
     if (existingWhIds.has(homeWhId)) {
       throw new Error('Item code "'+d.code+'" already exists in this warehouse. Use a different code.');
     }
+
+    // Also check for same name in same warehouse
+    const nameCheckRes = await fetch(
+      `${SB_URL}/rest/v1/items?warehouse_id=eq.${homeWhId}&name=eq.${encodeURIComponent(d.name)}&select=id&limit=1`,
+      { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}` } }
+    );
+    const nameExists = nameCheckRes.ok ? await nameCheckRes.json() : [];
+    if (nameExists.length > 0) {
+      throw new Error('An item named "'+d.name+'" already exists in this warehouse.');
+    }
     const row = await sb.insert('items', itemPayload(homeWhId, d.openingQty));
     if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, homeWhId, Number(d.openingQty));
 
@@ -943,6 +960,9 @@ const itemSvc = {
 
     this._cache = null; await this.loadAll();
     return mapItem(row);
+    } finally {
+      _itemSubmitting=false;
+    }
   },
   async update(id, d) {
     await sb.update('items', `id=eq.${id}`, {
@@ -3156,6 +3176,11 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
     if(!initial&&f.code){
       const exists=itemSvc.getAll(f.whId).find(i=>i.code===f.code&&i.id!==f.id);
       if(exists)err.code='Item code "'+f.code+'" already exists in this warehouse';
+    }
+    // Check for duplicate name in same warehouse (only on new item)
+    if(!initial&&f.name){
+      const nameExists=itemSvc.getAll(f.whId).find(i=>i.name.toLowerCase()===f.name.toLowerCase()&&i.id!==f.id);
+      if(nameExists)err.name='Item "'+f.name+'" already exists in this warehouse';
     }
     setE(err);return Object.keys(err).length===0;
   };
