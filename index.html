@@ -1505,6 +1505,7 @@ const SVG={
   print:`<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>`,
   eye:`<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`,
   bell:`<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>`,
+  key:`<circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L22 7l-3-3"/>`,
   logout:`<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>`,
   menu:`<line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>`,
   warehouse:`<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`,
@@ -1713,7 +1714,15 @@ function Sidebar(){
           React.createElement('div',{className:'s-name'},user?.name),
           React.createElement('div',{className:'s-role'},user?.role)
         ),
-        React.createElement('div',{className:'s-logout',onClick:logout,title:'Logout'},React.createElement(Ic,{n:'logout',s:15}))
+        React.createElement('div',{style:{display:'flex',gap:4}},
+          React.createElement('div',{
+            className:'s-logout',
+            title:'Change Password',
+            style:{color:'rgba(255,255,255,.4)'},
+            onClick:()=>setModal(React.createElement(ChangePasswordModal,{user,onClose:()=>setModal(null),onSaved:()=>{setModal(null);toast('Password changed','success');}}))
+          },React.createElement(Ic,{n:'key',s:15})),
+          React.createElement('div',{className:'s-logout',onClick:logout,title:'Logout'},React.createElement(Ic,{n:'logout',s:15}))
+        )
       )
     )
   );
@@ -2819,7 +2828,25 @@ function StockTransfer(){
 function Categories(){
   const {toast,setModal,isSA,reload,whId,nav}=useCtx();
   const [cats,setCats]=useState(catSvc.getAll());
-  const [detail,setDetail]=useState(null); // selected category for drill-down
+  const [detail,setDetail]=useState(null);
+  const [detailLoading,setDetailLoading]=useState(false);
+
+  // Open detail view and fetch line items
+  const openDetail=async(type,voucher)=>{
+    setDetailLoading(true);
+    let v={...voucher};
+    try{
+      if(type==='grn')     { const items=await fetchPurchaseItems(v.id); v={...v,items}; }
+      else if(type==='gin'){ const items=await fetchGINItems(v.id);      v={...v,items}; }
+      else if(type==='transfer'){ const items=await fetchTransferItems(v.id); v={...v,items}; }
+      else if(type==='con'){ const items=await fetchConItems(v.id);      v={...v,items}; }
+      else if(type==='pro'){ const r=await fetchProItems(v.id); v={...v,...r}; }
+      else if(type==='mr') { const items=await fetchMRItems(v.id);       v={...v,items}; }
+      else if(type==='dmg'){ const items=await fetchDMGItems(v.id);      v={...v,items}; }
+    }catch(e){ console.warn('fetchItems failed:',e.message); }
+    setDetail({type,data:v});
+    setDetailLoading(false);
+  }; // selected category for drill-down
   const [subFilter,setSubFilter]=useState('');  // sub-category filter in detail
   const [q,setQ]=useState('');
   const reloadCats=()=>{refreshCATS();setCats(catSvc.getAll());reload();};
@@ -3271,9 +3298,11 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
       ),
       React.createElement('div',{className:'fg'},
         React.createElement('label',{className:'flbl'},'Warehouse'),
-        React.createElement('select',{className:'fi',value:f.whId,onChange:ev=>s('whId',ev.target.value)},
-          whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name))
-        )
+        (initial&&!isSA)
+          ? React.createElement('input',{className:'fi',value:whSvc.getById(f.whId)?.name||f.whId,readOnly:true,style:{background:'var(--off2)'}})
+          : React.createElement('select',{className:'fi',value:f.whId,onChange:ev=>s('whId',ev.target.value)},
+              (initial&&!isSA?whs.filter(w=>w.id===f.whId):whs).map(w=>React.createElement('option',{key:w.id,value:w.id},w.name))
+            )
       ),
       React.createElement('div',{className:'fg'},
         React.createElement('label',{className:'flbl'},'Rack / Location'),
@@ -5940,8 +5969,8 @@ function Users(){
                     React.createElement(Ic,{n:'edit',s:13})
                   ),
                   React.createElement('button',{className:'btn btn-amber btn-sm',style:{fontSize:10,padding:'3px 8px',fontWeight:700},title:'Change Password for '+u.name,
-                    onClick:()=>setModal(React.createElement(ChangePasswordModal,{user:u,onClose:()=>setModal(null),onSave:(pw)=>{userSvc.update(u.id,{password:pw});toast('Password changed for '+u.name,'success');setModal(null);}}))},
-                    'Pwd'
+                    onClick:()=>setModal(React.createElement(ChangePasswordModal,{user:u,onClose:()=>setModal(null),onSaved:()=>{toast('Password changed for '+u.name,'success');setModal(null);}}))},
+                    '🔐 Pwd'
                   ),
                   React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',title:'Delete',
                     onClick:()=>setModal(React.createElement(Confirm,{title:'Delete User',text:`Delete "${u.name}"?`,onCancel:()=>setModal(null),onOk:async()=>{await userSvc.delete(u.id);toast('Deleted','success');reload();setModal(null);}}))},
@@ -6091,6 +6120,10 @@ function Approvals(){
     setTimeout(()=>w.print(),600);
   };
 
+  if(detailLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading voucher details...')
+  );
   // ── DETAIL VIEW ──
   if(detail){
     const v=detail.data;const type=detail.type;
@@ -6301,7 +6334,7 @@ function Approvals(){
           : allCON.map(v=>{
             const isPend=v.status==='Pending Approval';
             const canAct=canGIV&&isPend;
-            return React.createElement('tr',{key:v.id,style:{background:isPend?'#fdf4ff':'',cursor:'pointer'},onClick:()=>setDetail({type:'con',data:v})},
+            return React.createElement('tr',{key:v.id,style:{background:isPend?'#fdf4ff':'',cursor:'pointer'},onClick:()=>openDetail('con',v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'#7c3aed',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.conNo)),
               React.createElement('td',null,fmtDate(v.date)),
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -6311,7 +6344,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:5}},
-                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type:'con',data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail('con',v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
                 canAct&&React.createElement('button',{className:'btn btn-success btn-xs',onClick:()=>doApprove('con',v.id)},'✓'),
                 canAct&&React.createElement('button',{className:'btn btn-danger btn-xs',onClick:()=>openReject('con',v.id)},'✕')
               ))
@@ -6328,7 +6361,7 @@ function Approvals(){
           : allPRO.map(v=>{
             const isPend=v.status==='Pending Approval';
             const canAct=isSA&&isPend;
-            return React.createElement('tr',{key:v.id,style:{background:isPend?'#f0fdfa':'',cursor:'pointer'},onClick:()=>setDetail({type:'pro',data:v})},
+            return React.createElement('tr',{key:v.id,style:{background:isPend?'#f0fdfa':'',cursor:'pointer'},onClick:()=>openDetail('pro',v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'#0d9488',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.proNo)),
               React.createElement('td',null,fmtDate(v.date)),
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -6338,7 +6371,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:5}},
-                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type:'pro',data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail('pro',v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
                 canAct&&React.createElement('button',{className:'btn btn-success btn-xs',onClick:()=>doApprove('pro',v.id)},'✓'),
                 canAct&&React.createElement('button',{className:'btn btn-danger btn-xs',onClick:()=>openReject('pro',v.id)},'✕')
               ))
@@ -6359,7 +6392,7 @@ function Approvals(){
             const canAct=canGIV&&isPend;
             const PRIO_COLOR={'Normal':'var(--green)','Urgent':'var(--amber)','Critical':'var(--red)'};
             const PRIO_BG={'Normal':'var(--green-light)','Urgent':'#fffbeb','Critical':'var(--red-light)'};
-            return React.createElement('tr',{key:v.id,style:{background:isPend&&v.priority==='Critical'?'#fff5f5':isPend&&v.priority==='Urgent'?'#fffbeb':'',cursor:'pointer'},onClick:()=>setDetail({type:'mr',data:v})},
+            return React.createElement('tr',{key:v.id,style:{background:isPend&&v.priority==='Critical'?'#fff5f5':isPend&&v.priority==='Urgent'?'#fffbeb':'',cursor:'pointer'},onClick:()=>openDetail('mr',v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--blue)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.mrNo)),
               React.createElement('td',null,fmtDate(v.date)),
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -6370,7 +6403,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type:'mr',data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail('mr',v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
                 canAct&&React.createElement('button',{className:'btn btn-success btn-xs',onClick:()=>doApprove('mr',v.id)},'✓'),
                 canAct&&React.createElement('button',{className:'btn btn-danger btn-xs',onClick:()=>openReject('mr',v.id)},'✕')
               ))
@@ -6391,7 +6424,7 @@ function Approvals(){
             const canAct=canGIV&&isPend;
             const totalL=(v.items||[]).reduce((s,r)=>s+Number(r.totalLoss||0),0);
             const sym=settSvc.get().currencySymbol||'QR';
-            return React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>setDetail({type:'dmg',data:v})},
+            return React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>openDetail('dmg',v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--red)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.dmgNo)),
               React.createElement('td',null,fmtDate(v.date)),
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -6402,7 +6435,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type:'dmg',data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail('dmg',v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
                 canAct&&React.createElement('button',{className:'btn btn-success btn-xs',onClick:()=>doApprove('dmg',v.id)},'✓'),
                 canAct&&React.createElement('button',{className:'btn btn-danger btn-xs',onClick:()=>openReject('dmg',v.id)},'✕')
               ))
@@ -6417,7 +6450,7 @@ function Approvals(){
         React.createElement('tbody',null,
           [...allGRV.map(g=>({...g,dtype:'grn',vNo:g.grvNo,wId:g.whId})),...allGIV.map(g=>({...g,dtype:'gin',vNo:g.givNo,wId:g.whId})),...allTRN.map(t=>({...t,dtype:'transfer',vNo:t.trnNo,wId:t.fromWhId})),...allCON.map(v=>({...v,dtype:'con',vNo:v.conNo,wId:v.whId})),...allPRO.map(v=>({...v,dtype:'pro',vNo:v.proNo,wId:v.whId})),...allMR.map(v=>({...v,dtype:'mr',vNo:v.mrNo,wId:v.whId})),...allDMG.map(v=>({...v,dtype:'dmg',vNo:v.dmgNo,wId:v.whId}))]
           .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
-          .map(v=>React.createElement('tr',{key:v.id+v.dtype,style:{cursor:'pointer'},onClick:()=>setDetail({type:v.dtype,data:v})},
+          .map(v=>React.createElement('tr',{key:v.id+v.dtype,style:{cursor:'pointer'},onClick:()=>openDetail(v.dtype,v)},
             React.createElement('td',null,React.createElement('span',{style:{fontWeight:700,fontFamily:'var(--mono)',fontSize:11,color:v.dtype==='grn'?'var(--blue)':v.dtype==='gin'?'var(--amber)':'#0d9488'}},v.vNo||'\u2014')),
             React.createElement('td',null,React.createElement(Badge,{c:v.dtype==='grn'?'blue':v.dtype==='gin'?'amber':'teal'},v.dtype.toUpperCase())),
             React.createElement('td',null,fmtDate(v.date)),
@@ -6426,7 +6459,7 @@ function Approvals(){
             React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},si(v.status)),React.createElement(Badge,{c:sc(v.status)},v.status)),
             React.createElement('td',null,v.approvedBy||'\u2014'),
             React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type:v.dtype,data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+                React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail(v.dtype,v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
                 React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>printVoucher(v.dtype,v)},React.createElement(Ic,{n:'print',s:11}),' Print')
               ))
           ))
@@ -6658,13 +6691,31 @@ function BulkUploadModal({whId,onDone,onClose}){
     reader.readAsText(file);
   };
 
-  const importAll=()=>{
+  const [importing,setImporting]=useState(false);
+  const [importProgress,setImportProgress]=useState(0);
+
+  const importAll=async()=>{
+    setImporting(true);setImportProgress(0);
     let count=0;
-    rows.forEach(row=>{
-      const item=itemSvc.create({...row});
-      stockSvc.setQty(item.id,item.whId,Number(row.openingQty||0));
-      count++;
-    });
+    for(let i=0;i<rows.length;i++){
+      const row=rows[i];
+      try{
+        // Check if item with same code already exists in this warehouse
+        const existing=itemSvc.getAll(row.whId).find(it=>it.code===row.code);
+        if(existing){
+          // Item exists — just update its stock
+          await stockSvc.setQty(existing.id,existing.whId,Number(row.openingQty||0));
+        } else {
+          // New item — create in all warehouses
+          await itemSvc.create({...row,costPrice:Number(row.costPrice||0),minStock:Number(row.minStock||0),openingQty:Number(row.openingQty||0)});
+        }
+        count++;
+        setImportProgress(Math.round((i+1)/rows.length*100));
+      }catch(e){
+        console.warn('Row skip:',e.message);
+      }
+    }
+    setImporting(false);
     onDone(count);
   };
 
@@ -6716,8 +6767,15 @@ function BulkUploadModal({whId,onDone,onClose}){
         )
       ),
       React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
-        React.createElement('button',{className:'btn btn-outline',onClick:()=>setStep('upload')},'Cancel'),
-        React.createElement('button',{className:'btn btn-success',onClick:importAll},'Import '+String(rows.length)+' Items')
+        React.createElement('button',{className:'btn btn-outline',disabled:importing,onClick:()=>setStep('upload')},'← Back'),
+        React.createElement('button',{className:'btn btn-success',disabled:importing,onClick:importAll},
+          importing
+            ? React.createElement('span',{style:{display:'flex',alignItems:'center',gap:6}},
+                React.createElement('span',{style:{width:12,height:12,border:'2px solid rgba(255,255,255,.4)',borderTopColor:'#fff',borderRadius:'50%',display:'inline-block',animation:'spin .7s linear infinite'}}),
+                'Importing... '+importProgress+'%'
+              )
+            : 'Import '+String(rows.length)+' Items'
+        )
       )
     )
   );
@@ -6908,6 +6966,65 @@ function ClearDataModal({onClose,onConfirmed}){
     )
   );
 }
+
+
+// ── Change Password Modal ──
+function ChangePasswordModal({user,onClose,onSaved}){
+  const {toast}=useCtx();
+  const [oldPwd,setOldPwd]=useState('');
+  const [newPwd,setNewPwd]=useState('');
+  const [confirm,setConfirm]=useState('');
+  const [err,setErr]=useState('');
+  const [saving,setSaving]=useState(false);
+
+  const save=async()=>{
+    setErr('');
+    if(!oldPwd){setErr('Enter your current password');return;}
+    if(oldPwd!==user.password){setErr('Current password is incorrect');return;}
+    if(!newPwd||newPwd.length<6){setErr('New password must be at least 6 characters');return;}
+    if(newPwd!==confirm){setErr('Passwords do not match');return;}
+    setSaving(true);
+    try{
+      await userSvc.update(user.id,{...user,password:newPwd});
+      // Update session
+      const sess={...user,password:newPwd};
+      db.s('session',sess);
+      onSaved();
+    }catch(e){
+      setErr(e.message||'Failed to change password');
+    }finally{setSaving(false);}
+  };
+
+  return React.createElement(Modal,{title:'🔐 Change Password',onClose,size:'sm'},
+    React.createElement('div',{className:'alert alert-blue',style:{marginBottom:14}},
+      React.createElement(Ic,{n:'info',s:13}),' Changing password for: ',React.createElement('strong',null,user.name),' (',user.username,')'
+    ),
+    React.createElement('div',{className:'fg',style:{marginBottom:10}},
+      React.createElement('label',{className:'flbl'},'Current Password'),
+      React.createElement('input',{className:'fi',type:'password',value:oldPwd,onChange:e=>setOldPwd(e.target.value),placeholder:'Enter current password',autoFocus:true})
+    ),
+    React.createElement('div',{className:'fg',style:{marginBottom:10}},
+      React.createElement('label',{className:'flbl'},'New Password'),
+      React.createElement('input',{className:'fi',type:'password',value:newPwd,onChange:e=>setNewPwd(e.target.value),placeholder:'Minimum 6 characters'})
+    ),
+    React.createElement('div',{className:'fg',style:{marginBottom:12}},
+      React.createElement('label',{className:'flbl'},'Confirm New Password'),
+      React.createElement('input',{className:'fi',type:'password',value:confirm,onChange:e=>setConfirm(e.target.value),placeholder:'Re-enter new password',
+        onKeyDown:e=>e.key==='Enter'&&save()})
+    ),
+    err&&React.createElement('div',{className:'alert alert-red',style:{marginBottom:10}},
+      React.createElement(Ic,{n:'alert',s:13}),' ',err
+    ),
+    null,
+    React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+      React.createElement('button',{className:'btn btn-outline',onClick:onClose,disabled:saving},'Cancel'),
+      React.createElement('button',{className:'btn btn-primary',onClick:save,disabled:saving},
+        saving?'Saving...':'Change Password'
+      )
+    )
+  );
+}
+
 
 function App(){
   const {user,page,nav,modal,sideOpen,setSideOpen,whId,isSA}=useCtx();
