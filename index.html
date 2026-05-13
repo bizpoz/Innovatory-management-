@@ -6507,7 +6507,7 @@ function Approvals(){
     const mainDetail=type==='transfer'
       ? React.createElement('span',null,React.createElement(WhBadge,{whId:v.fromWhId}),' \u2192 ',React.createElement(WhBadge,{whId:v.toWhId}))
       : React.createElement('span',null,type==='grn'?v.supplierName:v.issuedTo);
-    return React.createElement('tr',{key:v.id,style:{background:isPend?'#fffdf0':'',cursor:'pointer'},onClick:()=>setDetail({type,data:v})},
+    return React.createElement('tr',{key:v.id,style:{background:isPend?'#fffdf0':'',cursor:'pointer'},onClick:()=>openDetail(type,v)},
       React.createElement('td',null,React.createElement('span',{style:{color:colr,fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},vNo||'\u2014')),
       React.createElement('td',null,fmtDate(v.date)),
       React.createElement('td',null,mainDetail),
@@ -6519,7 +6519,7 @@ function Approvals(){
         : '\u2014'),
       React.createElement('td',{onClick:e=>e.stopPropagation()},
         React.createElement('div',{style:{display:'flex',gap:5}},
-          React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>setDetail({type,data:v})},React.createElement(Ic,{n:'eye',s:11}),' View'),
+          React.createElement('button',{className:'btn btn-outline btn-xs',onClick:()=>openDetail(type,v)},React.createElement(Ic,{n:'eye',s:11}),' View'),
           canAct&&React.createElement('button',{className:'btn btn-success btn-xs',onClick:()=>doApprove(type,v.id)},'\u2713 OK'),
           canAct&&React.createElement('button',{className:'btn btn-danger btn-xs',onClick:()=>openReject(type,v.id)},'\u2715')
         )
