@@ -902,13 +902,21 @@ const itemSvc = {
     const allWHs = whSvc.getAll();
 
     // Insert the item in the home warehouse
-    const row = await sb.insert('items', {
-      warehouse_id: homeWhId, rack_id: d.rackId || null, code: d.code, name: d.name,
-      description: d.description, category: d.category, unit: d.unit,
-      cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
-      status: d.status || 'Active', opening_qty: Number(d.openingQty) || 0, sub_category: d.subCategory||null,
-      is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
-    });
+    let row;
+    try {
+      row = await sb.insert('items', {
+        warehouse_id: homeWhId, rack_id: d.rackId || null, code: d.code, name: d.name,
+        description: d.description, category: d.category, unit: d.unit,
+        cost_price: Number(d.costPrice) || 0, min_stock: Number(d.minStock) || 0,
+        status: d.status || 'Active', opening_qty: Number(d.openingQty) || 0, sub_category: d.subCategory||null,
+        is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
+      });
+    } catch(e) {
+      if(e.message && e.message.includes('duplicate key')) {
+        throw new Error('Item code "'+d.code+'" already exists in this warehouse. Please use a different code.');
+      }
+      throw e;
+    }
 
     // Set opening stock for home warehouse
     if (Number(d.openingQty) > 0) await stockSvc.setQty(row.id, homeWhId, Number(d.openingQty));
@@ -917,6 +925,13 @@ const itemSvc = {
     const otherWHs = allWHs.filter(w => w.id !== homeWhId);
     for (const wh of otherWHs) {
       try {
+        // Check if item with same code already exists in this warehouse
+        const existing = await sb.select('items', `warehouse_id=eq.${wh.id}&code=eq.${encodeURIComponent(d.code)}&limit=1`);
+        if (existing && existing.length > 0) {
+          // Already exists — just ensure a stock entry exists with current qty
+          await stockSvc.setQty(existing[0].id, wh.id, stockSvc.getQty(existing[0].id, wh.id));
+          continue;
+        }
         const copy = await sb.insert('items', {
           warehouse_id: wh.id, rack_id: null, code: d.code, name: d.name,
           description: d.description, category: d.category, unit: d.unit,
@@ -924,11 +939,11 @@ const itemSvc = {
           status: d.status || 'Active', opening_qty: 0, sub_category: d.subCategory||null,
           is_asset: !!d.isAsset, asset_code: d.assetCode || null, photo_url: d.photo || null,
         });
-        // Stock entry with 0 qty so it appears in stock view
+        // Stock entry with 0 qty so it shows in stock view
         await stockSvc.setQty(copy.id, wh.id, 0);
       } catch(e) {
-        // Skip if item code already exists in that warehouse
-        console.warn(`Item ${d.code} already exists in ${wh.name}, skipping`);
+        // Skip silently — item likely already exists
+        console.warn(`Skipped auto-create in ${wh.name}: ${e.message}`);
       }
     }
 
@@ -3142,6 +3157,11 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
     if(!f.category)err.category='Required';
     if(!f.costPrice||isNaN(f.costPrice))err.costPrice='Required';
     if(f.isAsset&&!f.assetCode)err.assetCode='Asset code required for assets';
+    // Check for duplicate code in the selected warehouse (only on new item)
+    if(!initial&&f.code){
+      const exists=itemSvc.getAll(f.whId).find(i=>i.code===f.code&&i.id!==f.id);
+      if(exists)err.code='Item code "'+f.code+'" already exists in this warehouse';
+    }
     setE(err);return Object.keys(err).length===0;
   };
 
@@ -3480,7 +3500,7 @@ function Items(){
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Item Master'),React.createElement('p',null,String(filtered.length)+' items'+(isSA?' across all warehouses':' in '+(whSvc.getById(whId)?.name||'')))),
       React.createElement('div',{className:'ph-r'},
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{whIdCtx:whF||whId||whs[0]?.id,onClose:()=>setModal(null),onSave:async d=>{const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item')
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{whIdCtx:whF||whId||whs[0]?.id,onClose:()=>setModal(null),onSave:async d=>{try{const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}catch(e){toast(e.message||'Failed to add item','error');}}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item')
       )
     ),
     React.createElement('div',{className:'sb-bar'},
