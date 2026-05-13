@@ -3980,7 +3980,19 @@ function GRVEntry(){
     items:[{itemId:'',itemName:'',rackId:'',unit:'NOS',qtyReceived:'',rate:'',amount:0}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewGrvId=row.id;
+      const items=await fetchPurchaseItems(viewGrvId);v={...v,items};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewGrv(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setItemRow=(idx,k,v)=>{
     const rows=[...form.items];rows[idx]={...rows[idx],[k]:v};
@@ -4034,7 +4046,11 @@ function GRVEntry(){
 
   const filteredGrvs=grvs.filter(g=>!q||(g.grvNo||'').toLowerCase().includes(q.toLowerCase())||(g.supplierName||'').toLowerCase().includes(q.toLowerCase()));
 
-  if(tab==='view'&&viewGrv)return React.createElement('div',null,
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewGrv)return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,viewGrv.grvNo),React.createElement('p',null,'Purchase Detail View')),
       React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-outline',onClick:()=>setTab('list')},'← Back'),React.createElement('button',{className:'btn btn-outline',onClick:()=>window.print()},React.createElement(Ic,{n:'print',s:13}),' Print'))
@@ -4209,7 +4225,7 @@ function GRVEntry(){
         React.createElement('tbody',null,
           filteredGrvs.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No Purchase records yet. Click + New Purchase to create one.')))
-            : filteredGrvs.map(g=>React.createElement('tr',{key:g.id,style:{cursor:'pointer'},onClick:()=>{setViewGrv(g);setTab('view');}},
+            : filteredGrvs.map(g=>React.createElement('tr',{key:g.id,style:{cursor:'pointer'},onClick:()=>openView(g)},
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--blue)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},g.grvNo)),
               React.createElement('td',null,fmtDate(g.date)),
               _gSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:g.whId})),
@@ -4218,7 +4234,7 @@ function GRVEntry(){
               React.createElement('td',null,String(g.totalQty||0)),
               React.createElement('td',null,React.createElement('strong',null,sym+' '+fmt(g.totalAmount||0,2))),
               React.createElement('td',null,React.createElement(Badge,{c:g.status==='Approved'?'green':g.status==='Rejected'?'red':g.status==='Draft'?'gray':'amber'},g.status)),
-              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewGrv(g);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(g)},React.createElement(Ic,{n:'eye',s:12})))
             ))
         )
       )
@@ -4335,7 +4351,19 @@ function GIVEntry(){
     items:[{itemId:'',itemName:'',rackId:'',unit:'NOS',availableQty:0,qtyIssued:'',remarks:''}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewGivId=row.id;
+      const items=await fetchGINItems(viewGivId);v={...v,items};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewGiv(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setItemRow=(idx,k,v)=>{
     const rows=[...form.items];rows[idx]={...rows[idx],[k]:v};
@@ -4378,7 +4406,11 @@ function GIVEntry(){
   const filteredGivs=givs.filter(g=>!q||(g.givNo||'').toLowerCase().includes(q.toLowerCase())||(g.issuedTo||'').toLowerCase().includes(q.toLowerCase()));
 
   // ── TAB: VIEW ──
-  if(tab==='view'&&viewGiv)return React.createElement('div',null,
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewGiv)return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,viewGiv.givNo),React.createElement('p',null,'GIN Detail View')),
       React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-outline',onClick:()=>setTab('list')},'← Back'),React.createElement('button',{className:'btn btn-outline',onClick:()=>window.print()},React.createElement(Ic,{n:'print',s:13}),' Print'))
@@ -4524,7 +4556,7 @@ function GIVEntry(){
         React.createElement('tbody',null,
           filteredGivs.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:8},React.createElement('div',{className:'te'},'No GIN records yet. Click + New GIN to create one.')))
-            : filteredGivs.map(g=>React.createElement('tr',{key:g.id,style:{cursor:'pointer'},onClick:()=>{setViewGiv(g);setTab('view');}},
+            : filteredGivs.map(g=>React.createElement('tr',{key:g.id,style:{cursor:'pointer'},onClick:()=>openView(g)},
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--amber)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},g.givNo)),
               React.createElement('td',null,fmtDate(g.date)),
               _ivSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:g.whId})),
@@ -4532,7 +4564,7 @@ function GIVEntry(){
               React.createElement('td',null,g.purpose||'-'),
               React.createElement('td',null,String(g.totalItems||g.items?.length||0)+' items'),
               React.createElement('td',null,React.createElement(Badge,{c:g.status==='Approved'?'green':g.status==='Rejected'?'red':'amber'},g.status)),
-              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewGiv(g);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(g)},React.createElement(Ic,{n:'eye',s:12})))
             ))
         )
       )
@@ -4571,7 +4603,19 @@ function Consumption(){
     items:[{itemId:'',itemName:'',unit:'NOS',availQty:0,qty:'',remarks:''}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewConId=row.id;
+      const items=await fetchConItems(viewConId);v={...v,items};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewCon(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setIR=(idx,k,v)=>{
     const rows=[...form.items];rows[idx]={...rows[idx],[k]:v};
@@ -4611,7 +4655,11 @@ function Consumption(){
   const filtered=cons.filter(g=>!q||(g.conNo||'').toLowerCase().includes(q.toLowerCase())||(g.jobNo||'').toLowerCase().includes(q.toLowerCase())||(g.jobType||'').toLowerCase().includes(q.toLowerCase()));
 
   // ── VIEW ──
-  if(tab==='view'&&viewCon)return React.createElement('div',null,
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewCon)return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,viewCon.conNo),React.createElement('p',null,'Consumption Voucher Detail')),
       React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-outline',onClick:()=>setTab('list')},'← Back'),React.createElement('button',{className:'btn btn-outline',onClick:()=>window.print()},React.createElement(Ic,{n:'print',s:13}),' Print'))
@@ -4755,7 +4803,7 @@ function Consumption(){
         React.createElement('tbody',null,
           filtered.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No consumption records yet.')))
-            : filtered.map(v=>React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>{setViewCon(v);setTab('view');}},
+            : filtered.map(v=>React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>openView(v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'#7c3aed',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.conNo)),
               React.createElement('td',null,fmtDate(v.date)),
               _cSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -4764,7 +4812,7 @@ function Consumption(){
               React.createElement('td',null,v.department||'-'),
               React.createElement('td',null,String(v.totalItems||v.items?.length||0)+' items'),
               React.createElement('td',null,React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
-              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewCon(v);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(v)},React.createElement(Ic,{n:'eye',s:12})))
             ))
         )
       )
@@ -4796,7 +4844,19 @@ function Production(){
     outputs:[{itemId:'',itemName:'',code:'',category:'GEN',unit:'NOS',costPrice:'',qty:''}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewProId=row.id;
+      const items_fetched=await fetchProItems(viewProId);v={...v,...items_fetched};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewPro(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setRawRow=(idx,k,v)=>{
     const rows=[...form.rawMaterials];rows[idx]={...rows[idx],[k]:v};
@@ -4832,7 +4892,11 @@ function Production(){
   const filtered=pros.filter(v=>!q||(v.proNo||'').toLowerCase().includes(q.toLowerCase())||(v.productName||'').toLowerCase().includes(q.toLowerCase()));
 
   // ── VIEW ──
-  if(tab==='view'&&viewPro)return React.createElement('div',null,
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewPro)return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,viewPro.proNo),React.createElement('p',null,'Production Order Detail')),
       React.createElement('div',{className:'ph-r'},React.createElement('button',{className:'btn btn-outline',onClick:()=>setTab('list')},'← Back'),React.createElement('button',{className:'btn btn-outline',onClick:()=>window.print()},React.createElement(Ic,{n:'print',s:13}),' Print'))
@@ -5030,7 +5094,7 @@ function Production(){
         React.createElement('tbody',null,
           filtered.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No production records yet.')))
-            : filtered.map(v=>React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>{setViewPro(v);setTab('view');}},
+            : filtered.map(v=>React.createElement('tr',{key:v.id,style:{cursor:'pointer'},onClick:()=>openView(v)},
               React.createElement('td',null,React.createElement('span',{style:{color:'#0d9488',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},v.proNo)),
               React.createElement('td',null,fmtDate(v.date)),
               _pSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
@@ -5039,7 +5103,7 @@ function Production(){
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--red)',fontWeight:600}},'\u2212 ',String((v.rawMaterials||[]).length),' items')),
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--green)',fontWeight:600}},'\u2191 ',String((v.outputs||[]).length),' items')),
               React.createElement('td',null,React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
-              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewPro(v);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(v)},React.createElement(Ic,{n:'eye',s:12})))
             ))
         )
       )
@@ -5074,7 +5138,19 @@ function MaterialRequest(){
     items:[{itemId:'',itemName:'',unit:'',availQty:0,qtyRequired:'',remarks:''}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewMRId=row.id;
+      const items=await fetchMRItems(viewMRId);v={...v,items};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewMR(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setIR=(idx,k,v)=>{
     const rows=[...form.items];rows[idx]={...rows[idx],[k]:v};
@@ -5155,7 +5231,11 @@ function MaterialRequest(){
     )
   );
 
-  if(tab==='view'&&viewMR)return React.createElement(VoucherView,{v:viewMR,onBack:()=>setTab('list')});
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewMR)return React.createElement(VoucherView,{v:viewMR,onBack:()=>setTab('list')});
 
   if(tab==='form')return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
@@ -5255,7 +5335,7 @@ function MaterialRequest(){
         React.createElement('tbody',null,
           filtered.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:10},React.createElement('div',{className:'te'},'No material requests yet.')))
-            : filtered.map(m=>React.createElement('tr',{key:m.id,style:{cursor:'pointer',background:m.priority==='Critical'?'#fff5f5':m.priority==='Urgent'?'#fffbeb':''},onClick:()=>{setViewMR(m);setTab('view');}},
+            : filtered.map(m=>React.createElement('tr',{key:m.id,style:{cursor:'pointer',background:m.priority==='Critical'?'#fff5f5':m.priority==='Urgent'?'#fffbeb':''},onClick:()=>openView(m)},
               React.createElement('td',null,React.createElement('span',{style:{color:'var(--blue)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},m.mrNo)),
               React.createElement('td',null,fmtDate(m.date)),
               _mSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:m.whId})),
@@ -5265,7 +5345,7 @@ function MaterialRequest(){
               React.createElement('td',null,String(m.totalItems||m.items?.length||0)+' items'),
               React.createElement('td',null,React.createElement('span',{style:{fontSize:11,color:'var(--txt2)'}},m.purpose||'-')),
               React.createElement('td',null,React.createElement(Badge,{c:m.status==='Approved'?'green':m.status==='Rejected'?'red':'amber'},m.status)),
-              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewMR(m);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+              React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(m)},React.createElement(Ic,{n:'eye',s:12})))
             ))
         )
       )
@@ -5297,7 +5377,19 @@ function DamagedProducts(){
     items:[{itemId:'',itemName:'',unit:'',availQty:0,qty:'',costPrice:0,totalLoss:0}],
   });
   const [form,setForm]=useState(blankForm);
-  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const [viewLoading,setViewLoading]=useState(false);
+  const openView=async(row)=>{
+    setViewLoading(true);
+    let v={...row};
+    try{
+      const viewDmgId=row.id;
+      const items=await fetchDMGItems(viewDmgId);v={...v,items};
+    }catch(e){console.warn('fetch items:',e.message);}
+    setViewDmg(v);
+    setTab('view');
+    setViewLoading(false);
+  };  const sf=(k,v)=>setForm(p=>({...p,[k]:v}));
 
   const setIR=(idx,k,v)=>{
     const rows=[...form.items];rows[idx]={...rows[idx],[k]:v};
@@ -5398,7 +5490,11 @@ function DamagedProducts(){
     );
   };
 
-  if(tab==='view'&&viewDmg)return React.createElement(VoucherView,{v:viewDmg,onBack:()=>setTab('list')});
+  if(viewLoading)return React.createElement('div',{style:{padding:'80px 0',textAlign:'center'}},
+    React.createElement('div',{style:{width:36,height:36,border:'3px solid var(--border2)',borderTopColor:'var(--blue)',borderRadius:'50%',animation:'spin .7s linear infinite',margin:'0 auto 12px'}}),
+    React.createElement('div',{style:{color:'var(--txt2)',fontSize:13}},'Loading details...')
+  );
+    if(tab==='view'&&viewDmg)return React.createElement(VoucherView,{v:viewDmg,onBack:()=>setTab('list')});
 
   if(tab==='form')return React.createElement('div',null,
     React.createElement('div',{className:'ph'},
@@ -5499,7 +5595,7 @@ function DamagedProducts(){
             ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No damage reports yet.')))
             : filtered.map(d=>{
               const totalL=d.items?.reduce((s,r)=>s+Number(r.totalLoss||0),0)||0;
-              return React.createElement('tr',{key:d.id,style:{cursor:'pointer'},onClick:()=>{setViewDmg(d);setTab('view');}},
+              return React.createElement('tr',{key:d.id,style:{cursor:'pointer'},onClick:()=>openView(d)},
                 React.createElement('td',null,React.createElement('span',{style:{color:'var(--red)',fontWeight:700,fontFamily:'var(--mono)',fontSize:11}},d.dmgNo)),
                 React.createElement('td',null,fmtDate(d.date)),
                 _dSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:d.whId})),
@@ -5508,7 +5604,7 @@ function DamagedProducts(){
                 React.createElement('td',null,String(d.totalItems||d.items?.length||0)),
                 React.createElement('td',null,React.createElement('strong',{style:{color:'var(--red)'}},sym+' '+fmt(totalL,2))),
                 React.createElement('td',null,React.createElement(Badge,{c:d.status==='Approved'?'green':d.status==='Rejected'?'red':'amber'},d.status)),
-                React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>{setViewDmg(d);setTab('view');}},React.createElement(Ic,{n:'eye',s:12})))
+                React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>openView(d)},React.createElement(Ic,{n:'eye',s:12})))
               );
             })
         )
