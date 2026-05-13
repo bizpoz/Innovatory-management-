@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -545,7 +546,7 @@ const SEED={
     {id:'u4',username:'store2',name:'WH2 Store Incharge',password:'store456',role:'Store',whId:'wh2',department:'Store',status:'Active',canApproveGRV:false,canApproveGIV:false,createdAt:ts()},
     {id:'u5',username:'mgr2',name:'WH2 Manager',password:'mgr456',role:'Manager',whId:'wh2',department:'Management',status:'Active',canApproveGRV:true,canApproveGIV:true,createdAt:ts()},
   ],
-  settings:{companyName:'BIZPOZ',subtitle:'Multi-Warehouse IMS',currencySymbol:'QR',grvPrefix:'PO',givPrefix:'GIN',trnPrefix:'TRN',conPrefix:'CON',proPrefix:'PRO',mrPrefix:'MR',dmgPrefix:'DMG',fiscalYear:'2024-25'},
+  settings:{companyName:'BIZPOZ',subtitle:'Multi-Warehouse IMS',currencySymbol:'QR',address:'',phone:'',email:'',taxNo:'',grvPrefix:'PO',givPrefix:'GIN',trnPrefix:'TRN',conPrefix:'CON',proPrefix:'PRO',mrPrefix:'MR',dmgPrefix:'DMG',fiscalYear:'2024-25'},
   suppliers:[
     {id:'sup1',name:'ABC Engineering Pvt. Ltd.',contact:'9876543210',email:'abc@eng.com',status:'Active',createdAt:ts()},
     {id:'sup2',name:'Techno Solutions',contact:'9876543211',email:'techno@sol.com',status:'Active',createdAt:ts()},
@@ -4030,8 +4031,21 @@ function GRVEntry(){
     ),
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
-        React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),React.createElement('div',{className:'voucher-title'},'Purchase Order (PO)')),
-        React.createElement('div',{style:{textAlign:'right'}},React.createElement('div',{className:'voucher-no'},viewGrv.grvNo),React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewGrv.date)),React.createElement(WhBadge,{whId:viewGrv.whId}))
+        React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          React.createElement('img',{src:BIZPOZ_LOGO,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover'}}),
+          React.createElement('div',null,
+            React.createElement('div',{style:{fontSize:14,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||'BIZPOZ'),
+            sett.subtitle&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',letterSpacing:'.5px'}},(sett.subtitle||'')),
+            sett.address&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:2}},sett.address),
+            sett.taxNo&&React.createElement('div',{style:{fontSize:10,color:'var(--txt)',fontWeight:700,marginTop:2}},'TAX REG # '+(sett.taxNo||''))
+          )
+        ),
+        React.createElement('div',{style:{textAlign:'right'}},
+          React.createElement('div',{className:'voucher-title'},'Purchase Order (PO)'),
+          React.createElement('div',{className:'voucher-no',style:{marginTop:4}},viewGrv.grvNo),
+          React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewGrv.date)),
+          React.createElement(WhBadge,{whId:viewGrv.whId})
+        )
       ),
       React.createElement('div',{className:'voucher-meta'},
         [['Supplier',viewGrv.supplierName||'-'],['Invoice No.',viewGrv.invoiceNo||'-'],['Invoice Date',fmtDate(viewGrv.invoiceDate)],['Challan No.',viewGrv.challanNo||'-'],['Transporter',viewGrv.transporter||'-'],['Vehicle No.',viewGrv.vehicleNo||'-']]
@@ -4257,6 +4271,34 @@ function QuickSupplierForm({onSave,onClose}){
   );
 }
 
+
+// ── Voucher Letterhead Component (used in all printable vouchers) ──
+function VoucherLetterhead({title,vNo,date,whId,status,color}){
+  const sett=settSvc.get();
+  return React.createElement('div',{className:'voucher-head'},
+    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:10}},
+      React.createElement('img',{src:BIZPOZ_LOGO,alt:'logo',style:{width:52,height:52,borderRadius:8,objectFit:'cover',flexShrink:0}}),
+      React.createElement('div',null,
+        React.createElement('div',{style:{fontSize:15,fontWeight:900,color:'var(--navy)',letterSpacing:'1px'}},sett.companyName||'BIZPOZ'),
+        sett.subtitle&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',letterSpacing:'.4px',marginTop:1}},(sett.subtitle||'')),
+        sett.address&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:3}},sett.address),
+        (sett.phone||sett.email)&&React.createElement('div',{style:{fontSize:10,color:'var(--txt2)',marginTop:1}},(sett.phone||'')+(sett.email?' | '+sett.email:'')),
+        sett.taxNo&&React.createElement('div',{style:{fontSize:10,color:'var(--txt)',fontWeight:700,marginTop:3}},'TAX REG # '+(sett.taxNo||''))
+      )
+    ),
+    React.createElement('div',{style:{textAlign:'right'}},
+      React.createElement('div',{className:'voucher-title',style:color?{color}:{}},(title||'')),
+      React.createElement('div',{className:'voucher-no',style:{marginTop:4,color:color||'var(--navy)'}},vNo||''),
+      React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(date)),
+      React.createElement(WhBadge,{whId}),
+      status&&React.createElement('div',{style:{marginTop:4}},
+        React.createElement('span',{style:{background:status==='Approved'?'var(--green-light)':status==='Rejected'?'var(--red-light)':'var(--amber-light)',color:status==='Approved'?'var(--green)':status==='Rejected'?'var(--red)':'var(--amber)',padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:700}},status)
+      )
+    )
+  );
+}
+
+
 function GIVEntry(){
   const {toast,reload,whId:_ivWhId,isSA:_ivSA,setModal}=useCtx();
   const [tab,setTab]=useState('list');
@@ -4328,7 +4370,14 @@ function GIVEntry(){
     ),
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
-        React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),React.createElement('div',{className:'voucher-title'},'Goods Issue Note (GIN)')),
+        React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
+                settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
+              )
+            ),React.createElement('div',{className:'voucher-title'},'Goods Issue Note (GIN)')),
         React.createElement('div',{style:{textAlign:'right'}},React.createElement('div',{className:'voucher-no'},viewGiv.givNo),React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewGiv.date)),React.createElement(WhBadge,{whId:viewGiv.whId}))
       ),
       React.createElement('div',{className:'voucher-meta'},
@@ -4554,7 +4603,14 @@ function Consumption(){
     ),
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
-        React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),React.createElement('div',{className:'voucher-title'},'Consumption Voucher (CON)')),
+        React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
+                settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
+              )
+            ),React.createElement('div',{className:'voucher-title'},'Consumption Voucher (CON)')),
         React.createElement('div',{style:{textAlign:'right'}},React.createElement('div',{className:'voucher-no',style:{color:'#7c3aed'}},viewCon.conNo),React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewCon.date)),React.createElement(WhBadge,{whId:viewCon.whId}))
       ),
       React.createElement('div',{className:'voucher-meta'},
@@ -4768,7 +4824,14 @@ function Production(){
     ),
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
-        React.createElement('div',null,React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),React.createElement('div',{className:'voucher-title'},'Production Order (PRO)')),
+        React.createElement('div',null,React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
+                settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
+              )
+            ),React.createElement('div',{className:'voucher-title'},'Production Order (PRO)')),
         React.createElement('div',{style:{textAlign:'right'}},React.createElement('div',{className:'voucher-no',style:{color:'var(--teal,#0d9488)'}},viewPro.proNo),React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:4}},fmtDate(viewPro.date)),React.createElement(WhBadge,{whId:viewPro.whId}))
       ),
       React.createElement('div',{className:'voucher-meta'},
@@ -5031,7 +5094,14 @@ function MaterialRequest(){
     React.createElement('div',{className:'voucher'},
       React.createElement('div',{className:'voucher-head'},
         React.createElement('div',null,
-          React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),
+          React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
+                settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
+              )
+            ),
           React.createElement('div',{className:'voucher-title'},'Material Request (MR)')
         ),
         React.createElement('div',{style:{textAlign:'right'}},
@@ -5260,7 +5330,14 @@ function DamagedProducts(){
       React.createElement('div',{className:'voucher'},
         React.createElement('div',{className:'voucher-head'},
           React.createElement('div',null,
-            React.createElement('div',{style:{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:3}},sett.companyName||'BIZPOZ'),
+            React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:6}},
+              React.createElement('img',{src:BIZPOZ_LOGO,alt:'',style:{width:44,height:44,borderRadius:7,objectFit:'cover'}}),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontSize:13,fontWeight:900,color:'var(--navy)',letterSpacing:'.5px'}},settSvc.get().companyName||'BIZPOZ'),
+                settSvc.get().address&&React.createElement('div',{style:{fontSize:9,color:'var(--txt2)',marginTop:1}},settSvc.get().address),
+                settSvc.get().taxNo&&React.createElement('div',{style:{fontSize:9,fontWeight:700,color:'var(--txt)',marginTop:1}},'TAX REG # '+settSvc.get().taxNo)
+              )
+            ),
             React.createElement('div',{className:'voucher-title',style:{color:'var(--red)'}},'Damage Report (DMG)')
           ),
           React.createElement('div',{style:{textAlign:'right'}},
@@ -5993,7 +6070,25 @@ function Approvals(){
   const {toast,setModal,user:me,reload,whId,isSA}=useCtx();
   const [tab,setTab]=useState('grn');
   const [detail,setDetail]=useState(null);
+  const [detailLoading,setDetailLoading]=useState(false);
   const [r,setR]=useState(0);
+
+  // Open detail view and fetch line items from Supabase
+  const openDetail=async(type,voucher)=>{
+    setDetailLoading(true);
+    let v={...voucher};
+    try{
+      if(type==='grn')     { const items=await fetchPurchaseItems(v.id); v={...v,items}; }
+      else if(type==='gin'){ const items=await fetchGINItems(v.id);      v={...v,items}; }
+      else if(type==='transfer'){ const items=await fetchTransferItems(v.id); v={...v,items}; }
+      else if(type==='con'){ const items=await fetchConItems(v.id);      v={...v,items}; }
+      else if(type==='pro'){ const r2=await fetchProItems(v.id); v={...v,...r2}; }
+      else if(type==='mr') { const items=await fetchMRItems(v.id);       v={...v,items}; }
+      else if(type==='dmg'){ const items=await fetchDMGItems(v.id);      v={...v,items}; }
+    }catch(e){ console.warn('fetchItems failed:',e.message); }
+    setDetail({type,data:v});
+    setDetailLoading(false);
+  };
   const reloadPage=()=>{setR(x=>x+1);reload();};
   const sym=settSvc.get().currencySymbol||'QR';
 
@@ -6073,30 +6168,59 @@ function Approvals(){
       :type==='dmg'?['#','Item','UOM','Qty','Rate','Loss']
       :type==='pro'?['#','Type','Item','UOM','Qty']
       :['#','Item','UOM','Qty',type==='mr'?'Remarks':'Notes'];
+    const wh2=whSvc.getById(v.whId||v.fromWhId);
     const html='<!DOCTYPE html><html><head><title>'+vNo+'</title><style>'+
-      'body{font-family:Arial,sans-serif;margin:20px;color:#000;font-size:12px}'+
-      'h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;font-weight:normal;color:#555;margin:0 0 16px}'+
-      '.head{display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:14px}'+
-      '.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8f8f8;padding:10px;border-radius:4px;margin-bottom:14px}'+
-      '.mf{font-size:10px}.mf .l{color:#888;font-size:9px;text-transform:uppercase;margin-bottom:2px}'+
-      'table{width:100%;border-collapse:collapse;margin-bottom:14px}th{background:#f0f0f0;padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border:1px solid #ddd}'+
-      'td{padding:7px 8px;border:1px solid #ddd;font-size:11px}'+
-      '.total{text-align:right;font-weight:bold;padding:8px;background:#f8f8f8}'+
-      '.status{display:inline-block;padding:3px 10px;border-radius:20px;font-weight:bold;font-size:11px}'+
-      '.signs{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:24px;padding-top:14px;border-top:1px solid #ccc}'+
-      '.sign .line{border-bottom:1px solid #999;height:28px;margin-bottom:4px}.sign .lbl{font-size:9px;color:#666;text-transform:uppercase}'+
-      '@media print{body{margin:8px}}'+
+      '*{box-sizing:border-box}'+
+      'body{font-family:Arial,sans-serif;margin:0;padding:24px;color:#111;font-size:12px;background:#fff}'+
+      '.letterhead{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:16px;margin-bottom:16px;border-bottom:3px solid #1a2744}'+
+      '.lh-left{display:flex;align-items:center;gap:14px}'+
+      '.lh-logo{width:64px;height:64px;border-radius:10px;object-fit:cover}'+
+      '.co-name{font-size:22px;font-weight:900;color:#1a2744;letter-spacing:1px;margin-bottom:2px}'+
+      '.co-sub{font-size:11px;color:#888;letter-spacing:.5px;margin-bottom:6px}'+
+      '.co-addr{font-size:10px;color:#555;line-height:1.6}'+
+      '.co-tax{font-size:10px;color:#333;font-weight:700;margin-top:4px}'+
+      '.lh-right{text-align:right}'+
+      '.doc-name{font-size:20px;font-weight:900;color:#1a2744;margin-bottom:6px}'+
+      '.doc-no{display:inline-block;font-size:14px;font-weight:700;background:#f0f4ff;border:1px solid #c7d2fe;padding:4px 14px;border-radius:20px;color:#1a2744;margin-bottom:5px}'+
+      '.doc-date{font-size:11px;color:#666;margin-bottom:4px}'+
+      '.wh-badge{display:inline-block;font-size:10px;font-weight:700;background:#1a2744;color:#fff;padding:3px 10px;border-radius:20px;margin-top:3px}'+
+      '.status-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-weight:bold;font-size:11px;margin-top:4px}'+
+      '.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f8faff;padding:10px;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:14px}'+
+      '.mf .l{color:#888;font-size:9px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}'+
+      '.mf .v{font-size:11px;font-weight:600;color:#222}'+
+      'table{width:100%;border-collapse:collapse;margin-bottom:14px}'+
+      'th{background:#1a2744;color:#fff;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px}'+
+      'td{padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}'+
+      'tr:nth-child(even){background:#f9fafb}'+
+      '.total-row td{font-weight:900;background:#f0f4ff;border-top:2px solid #1a2744;font-size:13px}'+
+      '.approved{background:#d1fae5;color:#065f46;padding:8px 14px;border-radius:6px;font-size:11px;margin:10px 0}'+
+      '.rejected{background:#fee2e2;color:#991b1b;padding:8px 14px;border-radius:6px;font-size:11px;margin:10px 0}'+
+      '.signs{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:28px;padding-top:16px;border-top:2px solid #e5e7eb}'+
+      '.sign .line{border-bottom:2px solid #aaa;height:32px;margin-bottom:5px}'+
+      '.sign .lbl{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;text-align:center}'+
+      '.footer{margin-top:20px;padding-top:10px;border-top:1px solid #e5e7eb;text-align:center;font-size:9px;color:#aaa}'+
+      '@media print{body{padding:12px}@page{margin:10mm;size:A4}}'+
       '</style></head><body>'+
-      '<div class="head">'+
-        '<div><div style="font-size:11px;font-weight:bold;color:#555;text-transform:uppercase">'+sett2.companyName+'</div>'+
-        '<h1>'+TYPE_LABELS[type]+'</h1><h2>'+vNo+' &nbsp;·&nbsp; '+fmtDate(v.date)+'</h2></div>'+
-        '<div style="text-align:right">'+
-          '<div style="font-size:16px;font-weight:900;letter-spacing:1px">'+vNo+'</div>'+
-          '<div style="font-size:11px;color:#555;margin-top:4px">'+(whSvc.getById(v.whId||v.fromWhId)?.name||'')+'</div>'+
-          '<div class="status" style="background:'+(v.status==='Approved'?'#d1fae5':v.status==='Rejected'?'#fee2e2':'#fef3c7')+';color:'+(v.status==='Approved'?'#065f46':v.status==='Rejected'?'#991b1b':'#92400e')+'">'+v.status+'</div>'+
+      '<div class="letterhead">'+
+        '<div class="lh-left">'+
+          '<img class="lh-logo" src="'+BIZPOZ_LOGO+'" alt="logo"/>'+
+          '<div>'+
+            '<div class="co-name">'+sett2.companyName+'</div>'+
+            '<div class="co-sub">'+(sett2.subtitle||'Inventory Management')+'</div>'+
+            (sett2.address?'<div class="co-addr">'+sett2.address+'</div>':'')+
+            ((sett2.phone||sett2.email)?'<div class="co-addr">'+(sett2.phone?'Tel: '+sett2.phone:'')+(sett2.email?' | '+sett2.email:'')+'</div>':'')+
+            (sett2.taxNo?'<div class="co-tax">TAX REG # '+sett2.taxNo+'</div>':'')+
+          '</div>'+
+        '</div>'+
+        '<div class="lh-right">'+
+          '<div class="doc-name">'+TYPE_LABELS[type]+'</div>'+
+          '<div class="doc-no">'+vNo+'</div><br>'+
+          '<div class="doc-date">Date: '+fmtDate(v.date)+'</div>'+
+          (wh2?'<div class="wh-badge">'+wh2.code+' — '+wh2.name+'</div><br>':'')+
+          '<span class="status-badge" style="background:'+(v.status==='Approved'?'#d1fae5':v.status==='Rejected'?'#fee2e2':'#fef3c7')+';color:'+(v.status==='Approved'?'#065f46':v.status==='Rejected'?'#991b1b':'#92400e')+'">'+v.status+'</span>'+
         '</div>'+
       '</div>'+
-      '<div class="meta">'+metaFields.map(([l,val])=>'<div class="mf"><div class="l">'+l+'</div><div>'+(val||'-')+'</div></div>').join('')+'</div>'+
+      '<div class="meta">'+metaFields.map(([l,val])=>'<div class="mf"><div class="l">'+l+'</div><div class="v">'+(val||'-')+'</div></div>').join('')+'</div>'+
       '<table><thead><tr>'+colHeaders.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+
       rows.map((row,i)=>{
         const item=itemSvc.getAll(null).find(x=>x.id===row.itemId);
@@ -6114,6 +6238,7 @@ function Approvals(){
       (v.approvedBy?'<div style="background:#d1fae5;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:11px">Approved by <strong>'+v.approvedBy+'</strong> on '+fmtDate(v.approvedAt)+'</div>':'')+
       (v.rejectReason?'<div style="background:#fee2e2;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:11px">Rejected: '+v.rejectReason+'</div>':'')+
       '<div class="signs">'+['Prepared By','Verified By','Approved By'].map(l=>'<div class="sign"><div class="line"></div><div class="lbl">'+l+'</div></div>').join('')+'</div>'+
+      '<div class="footer">'+sett2.companyName+' · '+TYPE_LABELS[type]+' · '+vNo+' · Printed on '+new Date().toLocaleDateString()+'</div>'+
       '</body></html>';
     const w=window.open('','_blank','width=900,height=700');
     w.document.write(html);w.document.close();
@@ -6499,6 +6624,14 @@ function Settings(){
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Name'),React.createElement('input',{className:'fi',value:s.companyName||'',onChange:e=>sf('companyName',e.target.value)})),
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Currency Symbol'),React.createElement('input',{className:'fi',value:s.currencySymbol||'',onChange:e=>sf('currencySymbol',e.target.value),placeholder:'QR'})),
           React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Fiscal Year'),React.createElement('input',{className:'fi',value:s.fiscalYear||'',onChange:e=>sf('fiscalYear',e.target.value),placeholder:'2024-25'}))
+        ),
+        React.createElement('div',{className:'frow'},
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Company Address (shown on vouchers)'),React.createElement('input',{className:'fi',value:s.address||'',onChange:e=>sf('address',e.target.value),placeholder:'Street, City, Country'})),
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Phone / Contact'),React.createElement('input',{className:'fi',value:s.phone||'',onChange:e=>sf('phone',e.target.value),placeholder:'+974 XXXX XXXX'}))
+        ),
+        React.createElement('div',{className:'frow'},
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Email'),React.createElement('input',{className:'fi',value:s.email||'',onChange:e=>sf('email',e.target.value),placeholder:'info@company.com'})),
+          React.createElement('div',{className:'fg'},React.createElement('label',{className:'flbl'},'Tax Reg. No. / CR No.'),React.createElement('input',{className:'fi',value:s.taxNo||'',onChange:e=>sf('taxNo',e.target.value),placeholder:'e.g. #231653279'}))
         ),
         React.createElement('div',{style:{marginTop:14,display:'flex',justifyContent:'flex-end'}},
           React.createElement('button',{className:'btn btn-primary',onClick:save},React.createElement(Ic,{n:'check',s:13,c:'#fff'}),' Save')
