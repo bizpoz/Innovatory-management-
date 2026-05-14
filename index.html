@@ -1118,7 +1118,7 @@ const grvSvc = {
       challan_no: d.challanNo, transporter: d.transporter, vehicle_no: d.vehicleNo,
       remarks: d.remarks, supplier_name: d.supplierName, total_qty: d.totalQty || 0,
       total_amount: d.totalAmount || 0, status: d.status || 'Pending Approval',
-      submitted_by: d.submittedBy || null,
+      submitted_by: d.submittedBy || null, total_items: d.items?.length || 0,
     });
     // Insert line items
     if (d.items?.length) {
@@ -1217,7 +1217,8 @@ const trnSvc = {
     const trnNo = await nextVoucherNo('trn', sett.trnPrefix || 'TRN');
     const row = await sb.insert('stock_transfers', {
       trn_no: trnNo, date: d.date, from_warehouse_id: d.fromWhId, to_warehouse_id: d.toWhId,
-      purpose: d.purpose, remarks: d.remarks, submitted_by: d.submittedBy || null, status: 'Pending Approval',
+      purpose: d.purpose, remarks: d.remarks, submitted_by: d.submittedBy || null,
+      status: 'Pending Approval', total_items: d.items?.length || 0,
     });
     if (d.items?.length) {
       await Promise.all(d.items.map(item => sb.insert('transfer_items', {
@@ -1275,7 +1276,7 @@ const conSvc = {
   async create(d) {
     const sett = settSvc.get();
     const conNo = await nextVoucherNo('con', sett.conPrefix || 'CON');
-    const row = await sb.insert('consumption_vouchers', { warehouse_id: d.whId, con_no: conNo, date: d.date, job_no: d.jobNo || null, job_type: d.jobType, department: d.department, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    const row = await sb.insert('consumption_vouchers', { warehouse_id: d.whId, con_no: conNo, date: d.date, job_no: d.jobNo || null, job_type: d.jobType, department: d.department, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null, total_items: (d.rawMaterials?.length||0)+(d.outputs?.length||0) });
     if (d.items?.length) await Promise.all(d.items.map(item => sb.insert('consumption_items', { consumption_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0, remarks: item.remarks || null })));
     this._cache = null; await this.loadAll(d.whId); return mapCON(row);
   },
@@ -1310,7 +1311,7 @@ const proSvc = {
   async create(d) {
     const sett = settSvc.get();
     const proNo = await nextVoucherNo('pro', sett.proPrefix || 'PRO');
-    const row = await sb.insert('production_orders', { warehouse_id: d.whId, pro_no: proNo, date: d.date, product_name: d.productName, batch_no: d.batchNo || null, remarks: d.remarks, status: 'Pending Approval', submitted_by: d.submittedBy || null });
+    const row = await sb.insert('production_orders', { warehouse_id: d.whId, pro_no: proNo, date: d.date, product_name: d.productName, batch_no: d.batchNo || null, remarks: d.remarks, status: 'Pending Approval', submitted_by: d.submittedBy || null, total_items: (d.rawMaterials?.length||0)+(d.outputs?.length||0) });
     if (d.rawMaterials?.length) await Promise.all(d.rawMaterials.map(item => sb.insert('production_raw_materials', { production_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0 })));
     if (d.outputs?.length) await Promise.all(d.outputs.map(item => sb.insert('production_outputs', { production_id: row.id, item_id: item.itemId || null, item_name: item.itemName || '', item_code: item.code || null, category: item.category || null, unit: item.unit, cost_price: Number(item.costPrice) || 0, qty: Number(item.qty) })));
     this._cache = null; await this.loadAll(d.whId); return mapPRO(row);
@@ -6512,7 +6513,11 @@ function Approvals(){
       React.createElement('td',null,fmtDate(v.date)),
       React.createElement('td',null,mainDetail),
       isSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId||v.fromWhId})),
-      React.createElement('td',null,React.createElement('span',{style:{fontWeight:600}},String(v.totalItems||0)),React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},' items')),
+      React.createElement('td',null,
+      v.totalItems>0
+        ? React.createElement('span',null,React.createElement('span',{style:{fontWeight:600}},String(v.totalItems)),' items')
+        : React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},'— click to view')
+    ),
       React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},si(v.status)),React.createElement(Badge,{c:sc(v.status)},v.status)),
       React.createElement('td',null,v.approvedBy
         ? React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:12}},v.approvedBy),React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},fmtDate(v.approvedAt)))
@@ -6636,7 +6641,11 @@ function Approvals(){
               React.createElement('td',null,React.createElement('strong',null,v.department||'-')),
               React.createElement('td',null,React.createElement('span',{style:{background:PRIO_BG[v.priority]||'var(--off2)',color:PRIO_COLOR[v.priority]||'var(--txt)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700}},v.priority||'Normal')),
               React.createElement('td',null,fmtDate(v.requiredBy)),
-              React.createElement('td',null,String(v.totalItems||0)+' items'),
+              React.createElement('td',null,
+              v.totalItems>0
+                ? React.createElement('span',null,String(v.totalItems),' items')
+                : React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},'— (view for details)')
+            ),
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
@@ -6667,7 +6676,11 @@ function Approvals(){
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
               React.createElement('td',null,React.createElement('span',{style:{background:'var(--red-light)',color:'var(--red)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},v.damageType||'-')),
               React.createElement('td',null,React.createElement('span',{style:{fontSize:11,color:'var(--txt2)'}},v.disposalMethod||'-')),
-              React.createElement('td',null,String(v.totalItems||0)+' items'),
+              React.createElement('td',null,
+              v.totalItems>0
+                ? React.createElement('span',null,String(v.totalItems),' items')
+                : React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},'— (view for details)')
+            ),
               React.createElement('td',null,React.createElement('strong',{style:{color:'var(--red)'}},sym+' '+fmt(totalL,2))),
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
@@ -6692,7 +6705,11 @@ function Approvals(){
             React.createElement('td',null,React.createElement(Badge,{c:v.dtype==='grn'?'blue':v.dtype==='gin'?'amber':'teal'},v.dtype.toUpperCase())),
             React.createElement('td',null,fmtDate(v.date)),
             React.createElement('td',null,React.createElement(WhBadge,{whId:v.wId})),
-            React.createElement('td',null,String(v.totalItems||0)+' items'),
+            React.createElement('td',null,
+              v.totalItems>0
+                ? React.createElement('span',null,String(v.totalItems),' items')
+                : React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},'— (view for details)')
+            ),
             React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},si(v.status)),React.createElement(Badge,{c:sc(v.status)},v.status)),
             React.createElement('td',null,v.approvedBy||'\u2014'),
             React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
