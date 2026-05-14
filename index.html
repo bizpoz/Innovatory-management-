@@ -711,11 +711,11 @@ const mapUser = r => r && ({ id: r.id, username: r.username, name: r.name, passw
 const mapStock = r => r && ({ id: r.id, itemId: r.item_id, whId: r.warehouse_id, qty: r.qty, updatedAt: r.updated_at });
 
 // Map voucher rows
-const mapGRV = r => r && ({ id: r.id, grvNo: r.grn_no, whId: r.warehouse_id, supplierId: r.supplier_id, supplierName: r.supplier_name, date: r.date, invoiceNo: r.invoice_no, invoiceDate: r.invoice_date, challanNo: r.challan_no, transporter: r.transporter, vehicleNo: r.vehicle_no, remarks: r.remarks, totalQty: r.total_qty, totalAmount: Number(r.total_amount), status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapGRV = r => r && ({ id: r.id, grvNo: r.grn_no, whId: r.warehouse_id, supplierId: r.supplier_id, supplierName: r.supplier_name, date: r.date, invoiceNo: r.invoice_no, invoiceDate: r.invoice_date, challanNo: r.challan_no, transporter: r.transporter, vehicleNo: r.vehicle_no, remarks: r.remarks, totalQty: r.total_qty, totalAmount: Number(r.total_amount), totalItems: r.total_items||0, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
 const mapGIV = r => r && ({ id: r.id, givNo: r.gin_no, whId: r.warehouse_id, issuedTo: r.issued_to, purpose: r.purpose, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
-const mapTRN = r => r && ({ id: r.id, trnNo: r.trn_no, fromWhId: r.from_warehouse_id, toWhId: r.to_warehouse_id, purpose: r.purpose, remarks: r.remarks, submittedBy: r.submitted_by, status: r.status, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, date: r.date, createdAt: r.created_at });
+const mapTRN = r => r && ({ id: r.id, trnNo: r.trn_no, fromWhId: r.from_warehouse_id, toWhId: r.to_warehouse_id, purpose: r.purpose, remarks: r.remarks, submittedBy: r.submitted_by, totalItems: r.total_items||0, status: r.status, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, date: r.date, createdAt: r.created_at });
 const mapCON = r => r && ({ id: r.id, conNo: r.con_no, whId: r.warehouse_id, date: r.date, jobNo: r.job_no, jobType: r.job_type, department: r.department, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
-const mapPRO = r => r && ({ id: r.id, proNo: r.pro_no, whId: r.warehouse_id, date: r.date, productName: r.product_name, batchNo: r.batch_no, remarks: r.remarks, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
+const mapPRO = r => r && ({ id: r.id, proNo: r.pro_no, whId: r.warehouse_id, date: r.date, productName: r.product_name, batchNo: r.batch_no, remarks: r.remarks, totalItems: (r.total_items)||0, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
 const mapMR  = r => r && ({ id: r.id, mrNo: r.mr_no, whId: r.warehouse_id, date: r.date, requiredBy: r.required_by, department: r.department, priority: r.priority, purpose: r.purpose, remarks: r.remarks, totalItems: r.total_items, status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
 const mapDMG = r => r && ({ id: r.id, dmgNo: r.dmg_no, whId: r.warehouse_id, date: r.date, damageType: r.damage_type, disposalMethod: r.disposal_method, reportedBy: r.reported_by, location: r.location, remarks: r.remarks, totalItems: r.total_items, totalLoss: Number(r.total_loss), status: r.status, submittedBy: r.submitted_by, approvedBy: r.approved_by, approvedAt: r.approved_at, rejectReason: r.reject_reason, createdAt: r.created_at });
 
@@ -6405,7 +6405,7 @@ function Approvals(){
       // Items table
       React.createElement('div',{className:'card'},
         React.createElement('div',{className:'card-hd'},
-          React.createElement('span',{className:'card-t'},'Items Detail — '+String((v.items||[]).length)+' items'),
+          React.createElement('span',{className:'card-t'},'Items Detail — '+String(v.totalItems||0)+' items'),
           type!=='transfer'&&React.createElement('div',{style:{fontWeight:700,color:'var(--green)'}},
             sym+' '+fmt((v.totalAmount||v.items?.reduce((s,r)=>s+Number(r.amount||0),0)||0),2)
           )
@@ -6512,7 +6512,7 @@ function Approvals(){
       React.createElement('td',null,fmtDate(v.date)),
       React.createElement('td',null,mainDetail),
       isSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId||v.fromWhId})),
-      React.createElement('td',null,String((v.items||[]).length)+' items'),
+      React.createElement('td',null,React.createElement('span',{style:{fontWeight:600}},String(v.totalItems||0)),React.createElement('span',{style:{color:'var(--txt3)',fontSize:11}},' items')),
       React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},si(v.status)),React.createElement(Badge,{c:sc(v.status)},v.status)),
       React.createElement('td',null,v.approvedBy
         ? React.createElement('div',null,React.createElement('div',{style:{fontWeight:600,fontSize:12}},v.approvedBy),React.createElement('div',{style:{fontSize:10,color:'var(--txt3)'}},fmtDate(v.approvedAt)))
@@ -6577,7 +6577,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
               React.createElement('td',null,React.createElement('span',{style:{background:'#f5f3ff',color:'#7c3aed',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},v.jobType||'-')),
               React.createElement('td',null,v.jobNo||'-'),
-              React.createElement('td',null,String(v.totalItems||v.items?.length||0)),
+              React.createElement('td',null,String(v.totalItems||0),' items'),
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:5}},
@@ -6636,7 +6636,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement('strong',null,v.department||'-')),
               React.createElement('td',null,React.createElement('span',{style:{background:PRIO_BG[v.priority]||'var(--off2)',color:PRIO_COLOR[v.priority]||'var(--txt)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700}},v.priority||'Normal')),
               React.createElement('td',null,fmtDate(v.requiredBy)),
-              React.createElement('td',null,String((v.items||[]).length)+' items'),
+              React.createElement('td',null,String(v.totalItems||0)+' items'),
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
               React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
@@ -6667,7 +6667,7 @@ function Approvals(){
               React.createElement('td',null,React.createElement(WhBadge,{whId:v.whId})),
               React.createElement('td',null,React.createElement('span',{style:{background:'var(--red-light)',color:'var(--red)',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600}},v.damageType||'-')),
               React.createElement('td',null,React.createElement('span',{style:{fontSize:11,color:'var(--txt2)'}},v.disposalMethod||'-')),
-              React.createElement('td',null,String((v.items||[]).length)+' items'),
+              React.createElement('td',null,String(v.totalItems||0)+' items'),
               React.createElement('td',null,React.createElement('strong',{style:{color:'var(--red)'}},sym+' '+fmt(totalL,2))),
               React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},isPend?'⏳':v.status==='Approved'?'✅':'❌'),React.createElement(Badge,{c:v.status==='Approved'?'green':v.status==='Rejected'?'red':'amber'},v.status)),
               React.createElement('td',null,v.approvedBy||'—'),
@@ -6692,7 +6692,7 @@ function Approvals(){
             React.createElement('td',null,React.createElement(Badge,{c:v.dtype==='grn'?'blue':v.dtype==='gin'?'amber':'teal'},v.dtype.toUpperCase())),
             React.createElement('td',null,fmtDate(v.date)),
             React.createElement('td',null,React.createElement(WhBadge,{whId:v.wId})),
-            React.createElement('td',null,String((v.items||[]).length)),
+            React.createElement('td',null,String(v.totalItems||0)+' items'),
             React.createElement('td',null,React.createElement('span',{style:{marginRight:3}},si(v.status)),React.createElement(Badge,{c:sc(v.status)},v.status)),
             React.createElement('td',null,v.approvedBy||'\u2014'),
             React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
@@ -6725,7 +6725,8 @@ function Settings(){
     React.createElement('div',{className:'tabs',style:{marginBottom:16}},
       React.createElement('div',{className:'tab'+(tab==='general'?' on':''),onClick:()=>setTab('general')},'⚙️ General'),
       React.createElement('div',{className:'tab'+(tab==='vouchers'?' on':''),onClick:()=>setTab('vouchers')},'📋 Voucher Prefixes'),
-      React.createElement('div',{className:'tab'+(tab==='supabase'?' on':''),onClick:()=>setTab('supabase')},'🔌 Database')
+      React.createElement('div',{className:'tab'+(tab==='supabase'?' on':''),onClick:()=>setTab('supabase')},'🔌 Database'),
+      React.createElement('div',{className:'tab'+(tab==='admin'?' on':''),onClick:()=>setTab('admin')},'👤 Admin Profile')
     ),
 
     // ── GENERAL ──
@@ -6892,9 +6893,145 @@ function Settings(){
           ' — it is designed to be visible. Your data is protected by Row Level Security (RLS) policies in Supabase, not by keeping the key secret.'
         )
       )
+    ),
+
+    // ── ADMIN PROFILE ──
+    tab==='admin'&&React.createElement(AdminProfileTab,{toast})
+  );
+}
+
+function AdminProfileTab({toast}){
+  const {user,login}=useCtx();
+  const saUser=userSvc.getAll().find(u=>u.role==='Super Admin');
+  const [step,setStep]=useState('verify'); // verify → edit
+  const [curPwd,setCurPwd]=useState('');
+  const [f,setF]=useState({name:saUser?.name||'',username:saUser?.username||'',newPwd:'',confirmPwd:''});
+  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
+  const [err,setErr]=useState({});
+  const [saving,setSaving]=useState(false);
+
+  const verify=()=>{
+    if(!curPwd){setErr({cur:'Enter current password'});return;}
+    if(curPwd!==saUser?.password){setErr({cur:'Incorrect password'});return;}
+    setErr({});setStep('edit');
+  };
+
+  const save=async()=>{
+    const e={};
+    if(!f.name)e.name='Required';
+    if(!f.username)e.username='Required';
+    // Check username unique (not taken by another user)
+    const taken=userSvc.getAll().find(u=>u.username===f.username&&u.id!==saUser?.id);
+    if(taken)e.username='Username already taken';
+    if(f.newPwd&&f.newPwd.length<6)e.newPwd='Minimum 6 characters';
+    if(f.newPwd&&f.newPwd!==f.confirmPwd)e.confirmPwd='Passwords do not match';
+    if(Object.keys(e).length){setErr(e);return;}
+    setSaving(true);
+    try{
+      const updated={...saUser,name:f.name,username:f.username};
+      if(f.newPwd)updated.password=f.newPwd;
+      await userSvc.update(saUser.id,updated);
+      // Update session so changes reflect immediately
+      db.s('session',{...updated});
+      toast('Admin profile updated successfully','success');
+      setStep('verify');setCurPwd('');setF(p=>({...p,newPwd:'',confirmPwd:''}));
+    }catch(ex){
+      setErr({save:ex.message||'Failed to save'});
+    }finally{setSaving(false);}
+  };
+
+  if(!saUser)return React.createElement('div',{className:'card',style:{textAlign:'center',color:'var(--txt3)'}},'No Super Admin user found');
+
+  return React.createElement('div',{className:'card',style:{maxWidth:520}},
+    // Header
+    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:14,marginBottom:20,paddingBottom:14,borderBottom:'1px solid var(--border)'}},
+      React.createElement('div',{style:{width:52,height:52,borderRadius:12,background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,color:'#fff',fontWeight:900}},
+        (saUser.name||'A')[0].toUpperCase()
+      ),
+      React.createElement('div',null,
+        React.createElement('div',{style:{fontWeight:800,fontSize:16,color:'var(--navy)'}},saUser.name),
+        React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginTop:2}},'@'+saUser.username+' · Super Admin'),
+        React.createElement('div',{style:{fontSize:11,color:'var(--green)',marginTop:2}},'● Active')
+      )
+    ),
+
+    // Step 1: Verify current password
+    step==='verify'&&React.createElement('div',null,
+      React.createElement('div',{style:{background:'var(--amber-light)',border:'1px solid var(--amber)',borderRadius:'var(--r)',padding:'10px 14px',marginBottom:16,fontSize:12,color:'var(--amber-dark)'}},
+        '🔐 Enter your current password to make changes to your admin profile'
+      ),
+      React.createElement('div',{className:'fg',style:{marginBottom:12}},
+        React.createElement('label',{className:'flbl'},'Current Password'),
+        React.createElement('input',{
+          className:'fi',type:'password',value:curPwd,
+          onChange:e=>setCurPwd(e.target.value),
+          placeholder:'Enter current password',
+          autoFocus:true,
+          onKeyDown:e=>e.key==='Enter'&&verify()
+        }),
+        err.cur&&React.createElement('div',{className:'fe'},err.cur)
+      ),
+      React.createElement('button',{className:'btn btn-primary',onClick:verify},'Verify & Continue →')
+    ),
+
+    // Step 2: Edit profile
+    step==='edit'&&React.createElement('div',null,
+      React.createElement('div',{style:{background:'var(--green-light)',border:'1px solid var(--green)',borderRadius:'var(--r)',padding:'8px 14px',marginBottom:16,fontSize:12,color:'var(--green-dark)'}},
+        '✅ Identity verified — you can now update your admin profile'
+      ),
+
+      // Name + Username row
+      React.createElement('div',{className:'frow',style:{marginBottom:4}},
+        React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'Display Name *'),
+          React.createElement('input',{className:'fi',value:f.name,onChange:e=>sf('name',e.target.value),placeholder:'e.g. Super Admin'}),
+          err.name&&React.createElement('div',{className:'fe'},err.name)
+        ),
+        React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'Username / Login ID *'),
+          React.createElement('input',{className:'fi',value:f.username,onChange:e=>sf('username',e.target.value.toLowerCase().replace(/\s/g,'')),placeholder:'e.g. admin'}),
+          err.username&&React.createElement('div',{className:'fe'},err.username)
+        )
+      ),
+
+      // Password section
+      React.createElement('div',{style:{marginTop:14,marginBottom:4,paddingTop:12,borderTop:'1px solid var(--border)'}},
+        React.createElement('div',{style:{fontSize:12,fontWeight:600,color:'var(--txt2)',marginBottom:10}},'Change Password (leave blank to keep current)')
+      ),
+      React.createElement('div',{className:'frow',style:{marginBottom:4}},
+        React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'New Password'),
+          React.createElement('input',{className:'fi',type:'password',value:f.newPwd,onChange:e=>sf('newPwd',e.target.value),placeholder:'Min 6 characters'}),
+          err.newPwd&&React.createElement('div',{className:'fe'},err.newPwd)
+        ),
+        React.createElement('div',{className:'fg'},
+          React.createElement('label',{className:'flbl'},'Confirm New Password'),
+          React.createElement('input',{className:'fi',type:'password',value:f.confirmPwd,onChange:e=>sf('confirmPwd',e.target.value),
+            placeholder:'Re-enter new password',onKeyDown:e=>e.key==='Enter'&&save()
+          }),
+          err.confirmPwd&&React.createElement('div',{className:'fe'},err.confirmPwd)
+        )
+      ),
+
+      err.save&&React.createElement('div',{style:{color:'var(--red)',fontSize:12,margin:'8px 0'}},err.save),
+
+      React.createElement('div',{style:{display:'flex',gap:8,marginTop:16}},
+        React.createElement('button',{className:'btn btn-outline',onClick:()=>{setStep('verify');setCurPwd('');setErr({});}},
+          '← Cancel'
+        ),
+        React.createElement('button',{className:'btn btn-primary',onClick:save,disabled:saving,style:{minWidth:120}},
+          saving
+            ? React.createElement('span',{style:{display:'flex',alignItems:'center',gap:6}},
+                React.createElement('span',{style:{width:12,height:12,border:'2px solid rgba(255,255,255,.4)',borderTopColor:'#fff',borderRadius:'50%',display:'inline-block',animation:'spin .7s linear infinite'}}),
+                'Saving...'
+              )
+            : '💾 Save Changes'
+        )
+      )
     )
   );
 }
+
 
 
 
