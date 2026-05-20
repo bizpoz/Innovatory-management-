@@ -7080,24 +7080,38 @@ function ClearItemsModal({onClose,onDone}){
     setStep('deleting');
     const addLog=(msg)=>setLog(p=>[...p,msg]);
     try{
-      // 1. Delete all stock entries
+      // Must delete in correct order: child tables first, then parent (items)
+      // Step 1: Delete all line item tables that reference items.id
+      const lineTables=[
+        'purchase_items','gin_items','transfer_items',
+        'consumption_items','production_raw_materials','production_outputs',
+        'material_request_items','damaged_product_items'
+      ];
+      addLog('🗑 Clearing line item references...');
+      for(let i=0;i<lineTables.length;i++){
+        addLog('  → '+lineTables[i]);
+        await sbFetch(lineTables[i]+'?id=not.is.null',{method:'DELETE',headers:{'Prefer':'return=minimal'}});
+        setProgress(Math.round((i+1)/lineTables.length*40));
+      }
+
+      // Step 2: Delete stock (also references items.id)
       addLog('🗑 Deleting stock quantities...');
       await sbFetch('stock?id=not.is.null',{method:'DELETE',headers:{'Prefer':'return=minimal'}});
-      setProgress(40);
+      setProgress(70);
 
-      // 2. Delete all items
+      // Step 3: Now safe to delete items
       addLog('🗑 Deleting all items...');
       await sbFetch('items?id=not.is.null',{method:'DELETE',headers:{'Prefer':'return=minimal'}});
       setProgress(90);
 
-      // 3. Clear local cache
+      // Step 4: Clear local cache
       addLog('🧹 Clearing local cache...');
       itemSvc._cache=null;
       stockSvc._cache=null;
       db.s('items',[]);db.s('stock',[]);
 
       setProgress(100);
-      addLog('✅ All items deleted!');
+      addLog('✅ All items deleted successfully!');
       setStep('done');
     }catch(e){
       addLog('❌ Error: '+e.message);
