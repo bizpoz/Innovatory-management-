@@ -1118,7 +1118,7 @@ const grvSvc = {
       challan_no: d.challanNo, transporter: d.transporter, vehicle_no: d.vehicleNo,
       remarks: d.remarks, supplier_name: d.supplierName, total_qty: d.totalQty || 0,
       total_amount: d.totalAmount || 0, status: d.status || 'Pending Approval',
-      submitted_by: d.submittedBy || null, total_items: d.items?.length || 0,
+      submitted_by: d.submittedBy || null,
     });
     // Insert line items
     if (d.items?.length) {
@@ -1129,7 +1129,9 @@ const grvSvc = {
       })));
     }
     this._cache = null; await this.loadAll(d.whId);
-    return mapGRV(row);
+    const result = mapGRV(row);
+    if(result) result.totalItems = d.items?.length || 0;
+    return result;
   },
   async approve(id, approverName) {
     const v = this.getAll().find(g => g.id === id);
@@ -1218,7 +1220,7 @@ const trnSvc = {
     const row = await sb.insert('stock_transfers', {
       trn_no: trnNo, date: d.date, from_warehouse_id: d.fromWhId, to_warehouse_id: d.toWhId,
       purpose: d.purpose, remarks: d.remarks, submitted_by: d.submittedBy || null,
-      status: 'Pending Approval', total_items: d.items?.length || 0,
+      status: 'Pending Approval',
     });
     if (d.items?.length) {
       await Promise.all(d.items.map(item => sb.insert('transfer_items', {
@@ -1227,7 +1229,9 @@ const trnSvc = {
       })));
     }
     this._cache = null; await this.loadAll(d.fromWhId);
-    return mapTRN(row);
+    const result = mapTRN(row);
+    if(result) result.totalItems = d.items?.length || 0;
+    return result;
   },
   async approve(id, approverName) {
     const v = this.getAll().find(t => t.id === id);
@@ -1276,7 +1280,7 @@ const conSvc = {
   async create(d) {
     const sett = settSvc.get();
     const conNo = await nextVoucherNo('con', sett.conPrefix || 'CON');
-    const row = await sb.insert('consumption_vouchers', { warehouse_id: d.whId, con_no: conNo, date: d.date, job_no: d.jobNo || null, job_type: d.jobType, department: d.department, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null, total_items: (d.rawMaterials?.length||0)+(d.outputs?.length||0) });
+    const row = await sb.insert('consumption_vouchers', { warehouse_id: d.whId, con_no: conNo, date: d.date, job_no: d.jobNo || null, job_type: d.jobType, department: d.department, remarks: d.remarks, total_items: d.totalItems || 0, status: 'Pending Approval', submitted_by: d.submittedBy || null });
     if (d.items?.length) await Promise.all(d.items.map(item => sb.insert('consumption_items', { consumption_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0, remarks: item.remarks || null })));
     this._cache = null; await this.loadAll(d.whId); return mapCON(row);
   },
@@ -1311,7 +1315,7 @@ const proSvc = {
   async create(d) {
     const sett = settSvc.get();
     const proNo = await nextVoucherNo('pro', sett.proPrefix || 'PRO');
-    const row = await sb.insert('production_orders', { warehouse_id: d.whId, pro_no: proNo, date: d.date, product_name: d.productName, batch_no: d.batchNo || null, remarks: d.remarks, status: 'Pending Approval', submitted_by: d.submittedBy || null, total_items: (d.rawMaterials?.length||0)+(d.outputs?.length||0) });
+    const row = await sb.insert('production_orders', { warehouse_id: d.whId, pro_no: proNo, date: d.date, product_name: d.productName, batch_no: d.batchNo || null, remarks: d.remarks, status: 'Pending Approval', submitted_by: d.submittedBy || null });
     if (d.rawMaterials?.length) await Promise.all(d.rawMaterials.map(item => sb.insert('production_raw_materials', { production_id: row.id, item_id: item.itemId, item_name: item.itemName || '', unit: item.unit, qty: Number(item.qty), avail_qty: Number(item.availQty) || 0 })));
     if (d.outputs?.length) await Promise.all(d.outputs.map(item => sb.insert('production_outputs', { production_id: row.id, item_id: item.itemId || null, item_name: item.itemName || '', item_code: item.code || null, category: item.category || null, unit: item.unit, cost_price: Number(item.costPrice) || 0, qty: Number(item.qty) })));
     this._cache = null; await this.loadAll(d.whId); return mapPRO(row);
@@ -7063,39 +7067,51 @@ function BulkUploadModal({whId,onDone,onClose}){
   const whs=whSvc.getAll();
   const [selWh,setSelWh]=useState(whId||whs[0]?.id||'');
   const UNITS=['NOS','KG','MTR','LTR','SET','BOX','PAIR','ROLL','PKT','BTL','DRM','SHT'];
-  const COLS='Name*,Category*(MECH/ELEC/INST/SAFE/GEN),Unit*,Cost Price*,Min Stock,Opening Qty,Is Asset(YES/NO),Asset Code,Description,Rack Code';
+  const COLS='Name*,Code(auto if blank),Category*(MECH/ELEC/INST/SAFE/GEN),Sub-Category(code or blank),Unit*,Cost Price*,Min Stock,Opening Qty,Is Asset(YES/NO),Asset Code,Description,Rack Code';
 
   const downloadTemplate=()=>{
+    const cats=catSvc.getAll();
+    const subCatRef=cats.filter(c=>c.parentId).map(c=>c.id).join('/');
+    const commentLine='# Sub-Category codes available: '+(subCatRef||'none yet — add in Category Master');
     const sample=[
-      'Bearing 6205,MECH,NOS,120,5,10,NO,,Deep groove ball bearing,R-01-01',
-      'Safety Helmet,SAFE,NOS,220,10,25,NO,,ISI marked hard hat,R-04-01',
-      'Control Panel,ELEC,NOS,15000,1,2,YES,ASSET-2024-001,Main control panel,R-02-01',
+      'Bearing 6205,,MECH,BEAR,NOS,120,5,10,NO,,Deep groove ball bearing,R-01-01',
+      'Safety Helmet,,SAFE,,NOS,220,10,25,NO,,ISI marked hard hat,R-04-01',
+      'Control Panel,,ELEC,,NOS,15000,1,2,YES,ASSET-2024-001,Main control panel,R-02-01',
     ];
-    const blob=new Blob([[COLS,...sample].join('\n')],{type:'text/csv'});
+    const blob=new Blob([[commentLine,COLS,...sample].join('\n')],{type:'text/csv'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bulk-upload-template.csv';a.click();
   };
 
   const parseCSV=(text)=>{
-    const lines=text.trim().split('\n');
+    const rawLines=text.trim().split('\n');
     const parsed=[];const errs=[];
     const allRacks=rackSvc.getAll(selWh);
-    lines.slice(1).forEach((line,i)=>{
+    const allCats=catSvc.getAll();
+    const validRootCats=allCats.filter(c=>!c.parentId).map(c=>c.id);
+    // Skip comment lines starting with #, then skip header row
+    const dataLines=rawLines.filter(l=>!l.trim().startsWith('#'));
+    dataLines.slice(1).forEach((line,i)=>{
       if(!line.trim())return;
-      const cols=line.split(',').map(s=>s.trim().replace(/^"|"$/g,''));
-      const [name,cat,unit,price,minStock,openingQty,isAsset,assetCode,desc,rackCode]=cols;
+      const cols=line.split(',').map(s=>s.trim().replace(/^\"|\"$/g,''));
+      const [name,code,cat,subCat,unit,price,minStock,openingQty,isAsset,assetCode,desc,rackCode]=cols;
       const rowNum=i+2;
       if(!name){errs.push('Row '+rowNum+': Name is required');return;}
-      if(!['MECH','ELEC','INST','SAFE','GEN'].includes(cat)){errs.push('Row '+rowNum+': Invalid category "'+cat+'"');return;}
+      const validCatIds=validRootCats.length?validRootCats:['MECH','ELEC','INST','SAFE','GEN'];
+      if(!validCatIds.includes(cat)){errs.push('Row '+rowNum+': Invalid category "'+cat+'" — valid: '+validCatIds.join(', '));return;}
       if(!price||isNaN(price)){errs.push('Row '+rowNum+': Cost Price must be a number');return;}
+      if(subCat){
+        const validSubCat=allCats.find(c=>c.id===subCat&&c.parentId===cat);
+        if(!validSubCat){errs.push('Row '+rowNum+': Sub-category "'+subCat+'" not found under "'+cat+'"');return;}
+      }
       const rack=allRacks.find(r=>r.code===rackCode)||null;
       const isAssetBool=(isAsset||'').toUpperCase()==='YES';
       if(isAssetBool&&!assetCode){errs.push('Row '+rowNum+': Asset Code required when Is Asset = YES');return;}
       parsed.push({
-        name,category:cat,unit:unit||'NOS',costPrice:Number(price),
+        name,category:cat,subCategory:subCat||'',unit:unit||'NOS',costPrice:Number(price),
         minStock:Number(minStock)||0,openingQty:Number(openingQty)||0,
         isAsset:isAssetBool,assetCode:assetCode||'',
         description:desc||'',rackId:rack?.id||'',whId:selWh,
-        code:itemSvc.nextCode(cat,selWh),status:'Active',
+        code:code||itemSvc.nextCode(cat,selWh),status:'Active',
       });
     });
     return {parsed,errs};
@@ -7172,13 +7188,17 @@ function BulkUploadModal({whId,onDone,onClose}){
       React.createElement('div',{className:'alert alert-green',style:{marginBottom:12}},React.createElement(Ic,{n:'check',s:13}),String(rows.length)+' items ready. Review and click Import.'),
       React.createElement('div',{className:'tw',style:{maxHeight:320,overflowY:'auto',marginBottom:12}},
         React.createElement('table',null,
-          React.createElement('thead',null,React.createElement('tr',null,['#','Code','Name','Cat','Unit','Price','Opening Qty','Asset'].map(h=>React.createElement('th',{key:h},h)))),
+          React.createElement('thead',null,React.createElement('tr',null,['#','Code','Name','Category','Sub-Cat','Unit','Price','Opening Qty','Asset'].map(h=>React.createElement('th',{key:h},h)))),
           React.createElement('tbody',null,
             rows.map((row,i)=>React.createElement('tr',{key:i},
               React.createElement('td',null,String(i+1)),
               React.createElement('td',null,React.createElement('span',{style:{fontFamily:'var(--mono)',fontSize:10}},row.code)),
               React.createElement('td',null,React.createElement('strong',null,row.name)),
               React.createElement('td',null,React.createElement(CatBadge,{catId:row.category})),
+              React.createElement('td',null,row.subCategory
+                ? React.createElement(CatBadge,{catId:row.subCategory})
+                : React.createElement('span',{style:{color:'var(--txt3)',fontSize:10}},'—')
+              ),
               React.createElement('td',null,row.unit),
               React.createElement('td',null,String(row.costPrice)),
               React.createElement('td',null,React.createElement('strong',{style:{color:'var(--green)'}},String(row.openingQty),' ',row.unit)),
