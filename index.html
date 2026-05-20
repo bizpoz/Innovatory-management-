@@ -7254,7 +7254,8 @@ function BulkUploadModal({whId,onDone,onClose}){
     reader.onload=(e)=>{
       const {parsed,errs}=parseCSV(e.target.result);
       setRows(parsed);setErrors(errs);
-      setStep(errs.length===0&&parsed.length>0?'preview':'errors');
+      // Always go to preview so user can edit rows inline even if there are errors
+      setStep(parsed.length>0?'preview':'errors');
     };
     reader.readAsText(file);
   };
@@ -7308,39 +7309,102 @@ function BulkUploadModal({whId,onDone,onClose}){
         React.createElement('code',null,COLS)
       )
     ),
-    step==='errors'&&React.createElement('div',null,
-      React.createElement('div',{className:'alert alert-red',style:{marginBottom:12}},React.createElement(Ic,{n:'alert',s:13}),String(errors.length)+' errors. Fix CSV and re-upload.'),
-      React.createElement('div',{style:{maxHeight:300,overflowY:'auto'}},
-        errors.map((e,i)=>React.createElement('div',{key:i,style:{fontSize:12,color:'var(--red)',padding:'4px 0',borderBottom:'1px solid var(--red-mid)'}},e))
+
+    (step==='preview'||step==='errors')&&React.createElement('div',null,
+      step==='errors'&&React.createElement('div',{className:'alert alert-amber',style:{marginBottom:10}},
+        React.createElement(Ic,{n:'alert',s:13}),' ',String(errors.length),' error(s) found — fix below and click Import, or go back.'
       ),
-      React.createElement('button',{className:'btn btn-outline',style:{marginTop:10},onClick:()=>setStep('upload')},'Try Again')
-    ),
-    step==='preview'&&React.createElement('div',null,
-      React.createElement('div',{className:'alert alert-green',style:{marginBottom:12}},React.createElement(Ic,{n:'check',s:13}),String(rows.length)+' items ready. Review and click Import.'),
-      React.createElement('div',{className:'tw',style:{maxHeight:320,overflowY:'auto',marginBottom:12}},
+      step==='preview'&&React.createElement('div',{className:'alert alert-green',style:{marginBottom:10}},
+        React.createElement(Ic,{n:'check',s:13}),' ',String(rows.length),' items ready. You can edit any cell before importing.'
+      ),
+      // Errors list
+      errors.length>0&&React.createElement('div',{style:{marginBottom:10,maxHeight:80,overflowY:'auto'}},
+        errors.map((e,i)=>React.createElement('div',{key:i,style:{fontSize:11,color:'var(--red)',padding:'2px 0'}},e))
+      ),
+      // Editable table
+      React.createElement('div',{className:'tw',style:{maxHeight:340,overflowY:'auto',marginBottom:12}},
         React.createElement('table',null,
-          React.createElement('thead',null,React.createElement('tr',null,['#','Code','Name','Category','Sub-Cat','Unit','Price','Opening Qty','Asset'].map(h=>React.createElement('th',{key:h},h)))),
+          React.createElement('thead',null,React.createElement('tr',null,
+            ['#','Code','Name*','Category*','Sub-Cat','Unit','Price*','Opening Qty','Asset',''].map(h=>React.createElement('th',{key:h,style:{fontSize:10}},h))
+          )),
           React.createElement('tbody',null,
-            rows.map((row,i)=>React.createElement('tr',{key:i},
-              React.createElement('td',null,String(i+1)),
-              React.createElement('td',null,React.createElement('span',{style:{fontFamily:'var(--mono)',fontSize:10}},row.code)),
-              React.createElement('td',null,React.createElement('strong',null,row.name)),
-              React.createElement('td',null,React.createElement(CatBadge,{catId:row.category})),
-              React.createElement('td',null,row.subCategory
-                ? React.createElement(CatBadge,{catId:row.subCategory})
-                : React.createElement('span',{style:{color:'var(--txt3)',fontSize:10}},'—')
-              ),
-              React.createElement('td',null,row.unit),
-              React.createElement('td',null,String(row.costPrice)),
-              React.createElement('td',null,React.createElement('strong',{style:{color:'var(--green)'}},String(row.openingQty),' ',row.unit)),
-              React.createElement('td',null,row.isAsset?React.createElement('span',{style:{color:'#c2410c',fontWeight:700}},'YES ('+row.assetCode+')'):'No')
-            ))
+            rows.map((row,i)=>{
+              const allCats=catSvc.getAll();
+              const rootCats=allCats.filter(c=>!c.parentId);
+              const subCats=allCats.filter(c=>c.parentId===row.category);
+              const updateRow=(field,val)=>setRows(prev=>prev.map((r,idx)=>idx===i?{...r,[field]:val}:r));
+              const deleteRow=()=>setRows(prev=>prev.filter((_,idx)=>idx!==i));
+              return React.createElement('tr',{key:i,style:{verticalAlign:'middle'}},
+                React.createElement('td',{style:{color:'var(--txt3)',fontSize:11}},String(i+1)),
+                // Code
+                React.createElement('td',null,React.createElement('input',{
+                  style:{width:80,fontFamily:'var(--mono)',fontSize:10,padding:'3px 5px',border:'1px solid var(--border2)',borderRadius:4},
+                  value:row.code||'',
+                  onChange:e=>updateRow('code',e.target.value.toUpperCase()),
+                  placeholder:'auto'
+                })),
+                // Name
+                React.createElement('td',null,React.createElement('input',{
+                  style:{width:140,fontSize:11,padding:'3px 5px',border:'1px solid var(--border2)',borderRadius:4,fontWeight:600},
+                  value:row.name||'',
+                  onChange:e=>updateRow('name',e.target.value)
+                })),
+                // Category
+                React.createElement('td',null,React.createElement('select',{
+                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4},
+                  value:row.category||'',
+                  onChange:e=>updateRow('category',e.target.value)
+                },rootCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.id)))),
+                // Sub-category
+                React.createElement('td',null,React.createElement('select',{
+                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4,
+                    borderColor:row.subCategory&&!allCats.find(c=>c.id===row.subCategory&&c.parentId===row.category)?'var(--red)':'var(--border2)'},
+                  value:row.subCategory||'',
+                  onChange:e=>updateRow('subCategory',e.target.value)
+                },
+                  React.createElement('option',{value:''},'—'),
+                  subCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.id))
+                )),
+                // Unit
+                React.createElement('td',null,React.createElement('select',{
+                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4},
+                  value:row.unit||'NOS',
+                  onChange:e=>updateRow('unit',e.target.value)
+                },['NOS','KG','MTR','LTR','SET','BOX','PAIR','ROLL','PKT','BTL','DRM','SHT'].map(u=>React.createElement('option',{key:u,value:u},u)))),
+                // Price
+                React.createElement('td',null,React.createElement('input',{
+                  type:'number',min:0,
+                  style:{width:70,fontSize:11,padding:'3px 5px',border:'1px solid var(--border2)',borderRadius:4},
+                  value:row.costPrice||0,
+                  onChange:e=>updateRow('costPrice',Number(e.target.value))
+                })),
+                // Opening Qty
+                React.createElement('td',null,React.createElement('input',{
+                  type:'number',min:0,
+                  style:{width:60,fontSize:11,padding:'3px 5px',border:'1px solid var(--border2)',borderRadius:4,color:'var(--green)',fontWeight:700},
+                  value:row.openingQty||0,
+                  onChange:e=>updateRow('openingQty',Number(e.target.value))
+                })),
+                // Asset
+                React.createElement('td',null,React.createElement('select',{
+                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4},
+                  value:row.isAsset?'YES':'NO',
+                  onChange:e=>updateRow('isAsset',e.target.value==='YES')
+                },['NO','YES'].map(v=>React.createElement('option',{key:v,value:v},v)))),
+                // Delete row
+                React.createElement('td',null,React.createElement('button',{
+                  style:{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14,padding:'2px 4px'},
+                  onClick:deleteRow,title:'Remove this row'
+                },'×'))
+              );
+            })
           )
         )
       ),
-      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
-        React.createElement('button',{className:'btn btn-outline',disabled:importing,onClick:()=>setStep('upload')},'← Back'),
-        React.createElement('button',{className:'btn btn-success',disabled:importing,onClick:importAll},
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',alignItems:'center'}},
+        React.createElement('span',{style:{fontSize:11,color:'var(--txt3)',marginRight:'auto'}},String(rows.length)+' items'),
+        React.createElement('button',{className:'btn btn-outline',disabled:importing,onClick:()=>{setStep('upload');setErrors([]);}},'← Back'),
+        React.createElement('button',{className:'btn btn-success',disabled:importing||rows.length===0,onClick:importAll},
           importing
             ? React.createElement('span',{style:{display:'flex',alignItems:'center',gap:6}},
                 React.createElement('span',{style:{width:12,height:12,border:'2px solid rgba(255,255,255,.4)',borderTopColor:'#fff',borderRadius:'50%',display:'inline-block',animation:'spin .7s linear infinite'}}),
