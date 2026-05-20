@@ -3590,7 +3590,15 @@ function Items(){
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},React.createElement('h1',null,'Item Master'),React.createElement('p',null,String(filtered.length)+' items'+(isSA?' across all warehouses':' in '+(whSvc.getById(whId)?.name||'')))),
       React.createElement('div',{className:'ph-r'},
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{whIdCtx:whF||whId||whs[0]?.id,onClose:()=>setModal(null),onSave:async d=>{const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item')
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{whIdCtx:whF||whId||whs[0]?.id,onClose:()=>setModal(null),onSave:async d=>{const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item'),
+        isSA&&React.createElement('button',{
+          className:'btn btn-danger btn-sm',
+          style:{marginLeft:8},
+          onClick:()=>setModal(React.createElement(ClearItemsModal,{
+            onClose:()=>setModal(null),
+            onDone:async()=>{await reload();setItems(itemSvc.getAll(whF||null));setModal(null);toast('All items deleted','success');}
+          }))
+        },React.createElement(Ic,{n:'trash',s:13,c:'#fff'}),' Clear All Items')
       )
     ),
     React.createElement('div',{className:'sb-bar'},
@@ -7059,6 +7067,115 @@ function AdminProfileTab({toast}){
 // ════════════════════════════════════════
 //  MAIN APP
 // ════════════════════════════════════════
+
+// ── CLEAR ALL ITEMS MODAL ──
+function ClearItemsModal({onClose,onDone}){
+  const [step,setStep]=useState('confirm'); // confirm → typing → deleting → done
+  const [typed,setTyped]=useState('');
+  const [progress,setProgress]=useState(0);
+  const [log,setLog]=useState([]);
+  const CONFIRM_WORD='DELETE ALL';
+
+  const runDelete=async()=>{
+    setStep('deleting');
+    const addLog=(msg)=>setLog(p=>[...p,msg]);
+    try{
+      // 1. Delete all stock entries
+      addLog('🗑 Deleting stock quantities...');
+      await sbFetch('stock?id=not.is.null',{method:'DELETE',headers:{'Prefer':'return=minimal'}});
+      setProgress(40);
+
+      // 2. Delete all items
+      addLog('🗑 Deleting all items...');
+      await sbFetch('items?id=not.is.null',{method:'DELETE',headers:{'Prefer':'return=minimal'}});
+      setProgress(90);
+
+      // 3. Clear local cache
+      addLog('🧹 Clearing local cache...');
+      itemSvc._cache=null;
+      stockSvc._cache=null;
+      db.s('items',[]);db.s('stock',[]);
+
+      setProgress(100);
+      addLog('✅ All items deleted!');
+      setStep('done');
+    }catch(e){
+      addLog('❌ Error: '+e.message);
+      setStep('error');
+    }
+  };
+
+  return React.createElement(Modal,{title:'🗑️ Clear All Items',onClose:step==='deleting'?null:onClose,size:'sm'},
+    // Step 1: Confirm
+    step==='confirm'&&React.createElement('div',null,
+      React.createElement('div',{style:{background:'#fef2f2',border:'2px solid var(--red)',borderRadius:'var(--r)',padding:'14px',marginBottom:16}},
+        React.createElement('div',{style:{fontWeight:800,fontSize:14,color:'var(--red)',marginBottom:8}},'⚠️ This will permanently delete:'),
+        React.createElement('ul',{style:{margin:0,paddingLeft:18,fontSize:12,color:'var(--red)',lineHeight:1.8}},
+          React.createElement('li',null,'All items across ALL warehouses'),
+          React.createElement('li',null,'All stock quantities')
+        ),
+        React.createElement('div',{style:{fontWeight:700,fontSize:12,color:'var(--red)',marginTop:8}},'Vouchers & transactions are kept. This cannot be undone.')
+      ),
+      React.createElement('div',{className:'fg',style:{marginBottom:14}},
+        React.createElement('label',{className:'flbl'},'Type  '+CONFIRM_WORD+'  to confirm'),
+        React.createElement('input',{
+          className:'fi',
+          value:typed,
+          onChange:e=>setTyped(e.target.value.toUpperCase()),
+          placeholder:CONFIRM_WORD,
+          style:{fontFamily:'var(--mono)',fontWeight:700,letterSpacing:'2px',
+            borderColor:typed===CONFIRM_WORD?'var(--red)':'var(--border2)'}
+        })
+      ),
+      React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+        React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Cancel'),
+        React.createElement('button',{
+          className:'btn btn-danger',
+          disabled:typed!==CONFIRM_WORD,
+          onClick:runDelete,
+          style:{opacity:typed===CONFIRM_WORD?1:0.5}
+        },'🗑️ Delete Everything')
+      )
+    ),
+
+    // Step 2: Deleting progress
+    step==='deleting'&&React.createElement('div',null,
+      React.createElement('div',{style:{marginBottom:12}},
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}},
+          React.createElement('span',null,'Deleting...'),
+          React.createElement('span',{style:{fontWeight:700}},progress+'%')
+        ),
+        React.createElement('div',{style:{height:8,background:'var(--border2)',borderRadius:20,overflow:'hidden'}},
+          React.createElement('div',{style:{width:progress+'%',height:'100%',background:'var(--red)',borderRadius:20,transition:'width .3s'}})
+        )
+      ),
+      React.createElement('div',{style:{maxHeight:180,overflowY:'auto',fontSize:11,background:'var(--off2)',borderRadius:'var(--r)',padding:'8px 10px'}},
+        log.map((l,i)=>React.createElement('div',{key:i,style:{padding:'2px 0',color:l.startsWith('❌')?'var(--red)':l.startsWith('✅')?'var(--green)':'var(--txt2)'}},l))
+      )
+    ),
+
+    // Step 3: Done
+    step==='done'&&React.createElement('div',{style:{textAlign:'center',padding:'20px 0'}},
+      React.createElement('div',{style:{fontSize:48,marginBottom:12}},'✅'),
+      React.createElement('div',{style:{fontWeight:800,fontSize:16,marginBottom:6}},'All items deleted!'),
+      React.createElement('div',{style:{fontSize:12,color:'var(--txt2)',marginBottom:20}},'You can now import your real inventory data.'),
+      React.createElement('button',{className:'btn btn-primary',onClick:onDone},'Done')
+    ),
+
+    // Error state
+    step==='error'&&React.createElement('div',null,
+      React.createElement('div',{className:'alert alert-red',style:{marginBottom:12}},'Some operations failed. Check console for details.'),
+      React.createElement('div',{style:{maxHeight:200,overflowY:'auto',fontSize:11}},
+        log.map((l,i)=>React.createElement('div',{key:i,style:{color:l.startsWith('❌')?'var(--red)':'var(--txt2)'}},l))
+      ),
+      React.createElement('div',{style:{display:'flex',gap:8,marginTop:12}},
+        React.createElement('button',{className:'btn btn-outline',onClick:onClose},'Close'),
+        React.createElement('button',{className:'btn btn-primary',onClick:onDone},'Reload App')
+      )
+    )
+  );
+}
+
 // ── BULK UPLOAD MODAL ──
 function BulkUploadModal({whId,onDone,onClose}){
   const [step,setStep]=useState('upload');
