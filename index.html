@@ -7263,37 +7263,130 @@ function BulkUploadModal({whId,onDone,onClose}){
   };
 
   const parseCSV=(text)=>{
-    const rawLines=text.trim().split('\n');
+    const rawLines=text.trim().split('\n').map(l=>l.replace(/\r$/,''));
     const parsed=[];const errs=[];
     const allRacks=rackSvc.getAll(selWh);
     const allCats=catSvc.getAll();
-    const validRootCats=allCats.filter(c=>!c.parentId).map(c=>c.id);
-    // Skip comment lines starting with #, then skip header row
-    const dataLines=rawLines.filter(l=>!l.trim().startsWith('#'));
+
+    // ── Auto-detect header row (skip comment lines and find the header) ──
+    const dataLines=rawLines.filter(l=>l.trim()&&!l.trim().startsWith('#'));
+    if(dataLines.length<2){return {parsed:[],errs:['CSV is empty or has no data rows']};}
+
+    // Detect header and figure out column positions dynamically
+    const hdr=dataLines[0].split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9]/g,''));
+    const colIdx=(keywords)=>{
+      for(const kw of keywords){
+        const i=hdr.findIndex(h=>h.includes(kw));
+        if(i>=0)return i;
+      }
+      return -1;
+    };
+
+    // Map columns by keywords - works for any column order
+    const iName     = colIdx(['name']);
+    const iCode     = colIdx(['code','itemcode']);
+    const iCat      = colIdx(['category','cat']);
+    const iSub      = colIdx(['sub','subcategory','subcategories']);
+    const iUnit     = colIdx(['unit','uom']);
+    const iPrice    = colIdx(['price','cost','rate']);
+    const iMinStock = colIdx(['min','minimum']);
+    const iQty      = colIdx(['opening','qty','quantity','stock']);
+    const iAsset    = colIdx(['asset']);
+    const iAssetCode= colIdx(['assetcode','assetno']);
+    const iDesc     = colIdx(['desc','description','remark']);
+    const iRack     = colIdx(['rack','location','bin']);
+
+    if(iName<0){return {parsed:[],errs:['Could not find a "Name" column in the CSV header']};}
+    if(iPrice<0){return {parsed:[],errs:['Could not find a "Price/Cost" column in the CSV header']};}
+
+    // Helper: resolve category by id OR name → return catId
+    const resolveOrCreateCat=(rawVal,parentCatId)=>{
+      if(!rawVal)return null;
+      const v=rawVal.trim();
+      // Try exact ID match first
+      let cat=allCats.find(c=>c.id===v.toUpperCase());
+      if(cat)return cat.id;
+      // Try name match (case-insensitive)
+      cat=allCats.find(c=>c.name.toLowerCase()===v.toLowerCase()&&(parentCatId?c.parentId===parentCatId:!c.parentId));
+      if(cat)return cat.id;
+      // Try partial match
+      cat=allCats.find(c=>c.name.toLowerCase().includes(v.toLowerCase())&&(parentCatId?c.parentId===parentCatId:!c.parentId));
+      if(cat)return cat.id;
+      return null; // not found
+    };
+
+    // Collect unknown categories for auto-create hint
+    const unknownCats=new Set();
+    const unknownSubs={};
+
     dataLines.slice(1).forEach((line,i)=>{
       if(!line.trim())return;
-      const cols=line.split(',').map(s=>s.trim().replace(/^\"|\"$/g,''));
-      const [name,code,cat,subCat,unit,price,minStock,openingQty,isAsset,assetCode,desc,rackCode]=cols;
+      const cols=line.split(',').map(s=>s.trim().replace(/^"|"$/g,''));
+      const g=(idx)=>idx>=0&&idx<cols.length?cols[idx]:'';
       const rowNum=i+2;
+
+      const name=g(iName);
       if(!name){errs.push('Row '+rowNum+': Name is required');return;}
-      const validCatIds=validRootCats.length?validRootCats:['MECH','ELEC','INST','SAFE','GEN'];
-      if(!validCatIds.includes(cat)){errs.push('Row '+rowNum+': Invalid category "'+cat+'" — valid: '+validCatIds.join(', '));return;}
-      if(!price||isNaN(price)){errs.push('Row '+rowNum+': Cost Price must be a number');return;}
-      if(subCat){
-        const validSubCat=allCats.find(c=>c.id===subCat&&c.parentId===cat);
-        if(!validSubCat){errs.push('Row '+rowNum+': Sub-category "'+subCat+'" not found under "'+cat+'"');return;}
+
+      // Price
+      const rawPrice=g(iPrice);
+      if(!rawPrice||isNaN(rawPrice)){errs.push('Row '+rowNum+' "'+name+'": Cost Price must be a number (got "'+rawPrice+'")');return;}
+
+      // Category - resolve by name or code
+      const rawCat=g(iCat)||'GEN';
+      const catId=resolveOrCreateCat(rawCat,null);
+      if(!catId){
+        unknownCats.add(rawCat);
+        errs.push('Row '+rowNum+' "'+name+'": Unknown category "'+rawCat+'" — will be shown in preview as GEN');
       }
+
+      // Sub-category - resolve by name or code under the found parent
+      const rawSub=g(iSub);
+      let subCatId='';
+      if(rawSub&&catId){
+        subCatId=resolveOrCreateCat(rawSub,catId)||'';
+        if(!subCatId){
+          if(!unknownSubs[rawCat])unknownSubs[rawCat]=new Set();
+          unknownSubs[rawCat].add(rawSub);
+          // Don't error — just leave blank, user can fix in preview
+        }
+      }
+
+      const unit=g(iUnit)||'NOS';
+      const minStock=Number(g(iMinStock))||0;
+      const openingQty=Number(g(iQty))||0;
+      const isAssetBool=(g(iAsset)||'').toUpperCase()==='YES';
+      const assetCode=g(iAssetCode)||'';
+      const desc=g(iDesc)||'';
+      const rackCode=g(iRack)||'';
       const rack=allRacks.find(r=>r.code===rackCode)||null;
-      const isAssetBool=(isAsset||'').toUpperCase()==='YES';
-      if(isAssetBool&&!assetCode){errs.push('Row '+rowNum+': Asset Code required when Is Asset = YES');return;}
+      const code=g(iCode)||'';
+
       parsed.push({
-        name,category:cat,subCategory:subCat||'',unit:unit||'NOS',costPrice:Number(price),
-        minStock:Number(minStock)||0,openingQty:Number(openingQty)||0,
-        isAsset:isAssetBool,assetCode:assetCode||'',
-        description:desc||'',rackId:rack?.id||'',whId:selWh,
-        code:code||itemSvc.nextCode(cat,selWh),status:'Active',
+        name,
+        category:catId||'GEN',
+        subCategory:subCatId||'',
+        unit,
+        costPrice:Number(rawPrice)||0,
+        minStock,openingQty,
+        isAsset:isAssetBool,assetCode,
+        description:desc,rackId:rack?.id||'',
+        whId:selWh,
+        code:code||'',
+        status:'Active',
+        _rawCat:rawCat,
+        _rawSub:rawSub||'',
       });
     });
+
+    // Add summary warnings for unknown cats/subs (not errors - user can fix in preview)
+    if(unknownCats.size>0){
+      errs.unshift('⚠️ Unknown categories (set to GEN — fix in preview): '+[...unknownCats].join(', '));
+    }
+    Object.entries(unknownSubs).forEach(([cat,subs])=>{
+      errs.push('⚠️ Sub-categories not found under "'+cat+'" (cleared — fix in preview): '+[...subs].join(', '));
+    });
+
     return {parsed,errs};
   };
 
@@ -7400,19 +7493,23 @@ function BulkUploadModal({whId,onDone,onClose}){
                 })),
                 // Category
                 React.createElement('td',null,React.createElement('select',{
-                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4},
+                  style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4,
+                    background:row._rawCat&&!allCats.find(c=>c.name.toLowerCase()===row._rawCat.toLowerCase()&&!c.parentId)?'#fff7ed':''},
                   value:row.category||'',
                   onChange:e=>updateRow('category',e.target.value)
-                },rootCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.id)))),
+                },
+                  React.createElement('option',{value:''},'— Select —'),
+                  rootCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.name))
+                )),
                 // Sub-category
                 React.createElement('td',null,React.createElement('select',{
                   style:{fontSize:11,padding:'3px 4px',border:'1px solid var(--border2)',borderRadius:4,
-                    borderColor:row.subCategory&&!allCats.find(c=>c.id===row.subCategory&&c.parentId===row.category)?'var(--red)':'var(--border2)'},
+                    background:row._rawSub&&!row.subCategory?'#fff7ed':''},
                   value:row.subCategory||'',
                   onChange:e=>updateRow('subCategory',e.target.value)
                 },
-                  React.createElement('option',{value:''},'—'),
-                  subCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.id))
+                  React.createElement('option',{value:''},'—'+(row._rawSub&&!row.subCategory?' (was: '+row._rawSub+')':'')),
+                  subCats.map(c=>React.createElement('option',{key:c.id,value:c.id},c.icon+' '+c.name))
                 )),
                 // Unit
                 React.createElement('td',null,React.createElement('select',{
