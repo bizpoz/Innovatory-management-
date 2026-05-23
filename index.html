@@ -431,36 +431,70 @@ const DEFAULT_CATS=[
 
 // catSvc — manages categories in localStorage
 const catSvc={
-  getAll:()=>JSON.parse(localStorage.getItem('gs_cats')||'null')||DEFAULT_CATS,
-  save:(cats)=>localStorage.setItem('gs_cats',JSON.stringify(cats)),
-  getRoots:()=>catSvc.getAll().filter(c=>!c.parentId),
-  getChildren:(parentId)=>catSvc.getAll().filter(c=>c.parentId===parentId),
-  getDisplayName:(id)=>{
-    const cat=catSvc.getAll().find(c=>c.id===id);
+  _cache: null,
+  getAll(){ return this._cache || JSON.parse(localStorage.getItem('gs_cats')||'null') || DEFAULT_CATS; },
+  getRoots(){ return this.getAll().filter(c=>!c.parentId); },
+  getChildren(parentId){ return this.getAll().filter(c=>c.parentId===parentId); },
+  getDisplayName(id){
+    const cat=this.getAll().find(c=>c.id===id);
     if(!cat)return id;
-    if(cat.parentId){const p=catSvc.getAll().find(c=>c.id===cat.parentId);return(p?p.short+' › ':'')+cat.short;}
+    if(cat.parentId){const p=this.getAll().find(c=>c.id===cat.parentId);return(p?p.short+' › ':'')+cat.short;}
     return cat.short;
   },
-  create:(d)=>{
-    const cats=catSvc.getAll();
-    const cat={...d,id:d.id.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)||('CAT'+Date.now().toString(36).slice(-3).toUpperCase())};
+  _sync(cats){ this._cache=cats; localStorage.setItem('gs_cats',JSON.stringify(cats)); },
+  async loadAll(){
+    try{
+      const rows=await sb.select('categories','','order=created_at.asc');
+      if(rows&&rows.length>0){
+        const mapped=rows.map(r=>({id:r.id,name:r.name,short:r.short,icon:r.icon||'📦',
+          color:r.color||'#2563eb',bg:r.bg||'#eff6ff',parentId:r.parent_id||null}));
+        this._sync(mapped); return mapped;
+      }
+      // Seed default cats to Supabase on first load
+      await this._seedDefaults();
+    }catch(e){ console.warn('catSvc.loadAll:',e.message); }
+    return this.getAll();
+  },
+  async _seedDefaults(){
+    try{
+      for(const cat of DEFAULT_CATS){
+        await sb.insert('categories',{id:cat.id,name:cat.name,short:cat.short,
+          icon:cat.icon,color:cat.color,bg:cat.bg,parent_id:null}).catch(()=>{});
+      }
+      const rows=await sb.select('categories','','order=created_at.asc');
+      if(rows&&rows.length>0){
+        const mapped=rows.map(r=>({id:r.id,name:r.name,short:r.short,icon:r.icon||'📦',
+          color:r.color||'#2563eb',bg:r.bg||'#eff6ff',parentId:r.parent_id||null}));
+        this._sync(mapped);
+      }
+    }catch(e){ console.warn('catSvc._seedDefaults:',e.message); }
+  },
+  async create(d){
+    const cats=this.getAll();
+    const cat={...d,id:d.id.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8)||('CAT'+Date.now().toString(36).slice(-3).toUpperCase())};
     if(cats.find(c=>c.id===cat.id))throw new Error('Category code already exists');
-    catSvc.save([...cats,cat]);return cat;
+    await sb.insert('categories',{id:cat.id,name:cat.name,short:cat.short,
+      icon:cat.icon||'📦',color:cat.color||'#2563eb',bg:cat.bg||'#eff6ff',
+      parent_id:cat.parentId||null});
+    await this.loadAll(); return cat;
   },
-  update:(id,d)=>{
-    const newId=d.id||id;
-    const cats=catSvc.getAll().map(c=>c.id===id?{...c,...d,id:newId}:c);
-    catSvc.save(cats);
-    // If ID changed, update all items using the old category ID
+  async update(id,d){
+    const newId=(d.id||id).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+    await sb.update('categories',`id=eq.${id}`,{id:newId,name:d.name,short:d.short,
+      icon:d.icon||'📦',color:d.color||'#2563eb',bg:d.bg||'#eff6ff',parent_id:d.parentId||null});
     if(newId!==id){
-      const allItems=db.g('items')||[];
-      const updated=allItems.map(i=>i.category===id?{...i,category:newId}:i);
-      db.s('items',updated);
-      if(itemSvc._cache)itemSvc._cache=itemSvc._cache.map(i=>i.category===id?{...i,category:newId}:i);
+      // Update all items using old category ID
+      await sb.update('items',`category=eq.${id}`,{category:newId}).catch(()=>{});
+      await sb.update('items',`sub_category=eq.${id}`,{sub_category:newId}).catch(()=>{});
+      if(itemSvc._cache)itemSvc._cache=itemSvc._cache.map(i=>({...i,
+        category:i.category===id?newId:i.category,
+        subCategory:i.subCategory===id?newId:i.subCategory}));
     }
+    await this.loadAll();
   },
-  delete:(id)=>{
-    catSvc.save(catSvc.getAll().filter(c=>c.id!==id));
+  async delete(id){
+    await sb.delete('categories',`id=eq.${id}`);
+    await this.loadAll();
   },
 };
 
@@ -802,40 +836,54 @@ const whSvc = {
 
 // ── WAREHOUSE GROUP SERVICE ──
 const whGroupSvc={
-  getAll:()=>JSON.parse(localStorage.getItem('gs_whgroups')||'null')||[],
-  save:(groups)=>localStorage.setItem('gs_whgroups',JSON.stringify(groups)),
-  getById:(id)=>whGroupSvc.getAll().find(g=>g.id===id),
-  create:(d)=>{
-    const groups=whGroupSvc.getAll();
-    const g={...d,id:'grp_'+(Date.now().toString(36)),createdAt:new Date().toISOString()};
-    whGroupSvc.save([...groups,g]);
-    // Set mainWhId's group assignment
-    if(d.mainWhId)whGroupSvc.assignWH(g.id,d.mainWhId);
+  _cache: null,
+  getAll(){ return this._cache || JSON.parse(localStorage.getItem('gs_whgroups')||'null') || []; },
+  _sync(groups){ this._cache=groups; localStorage.setItem('gs_whgroups',JSON.stringify(groups)); },
+  getById(id){ return this.getAll().find(g=>g.id===id); },
+  async loadAll(){
+    try{
+      const rows=await sb.select('warehouse_groups','','order=created_at.asc');
+      if(rows){
+        const groups=rows.map(r=>({id:r.id,name:r.name,description:r.description||'',
+          mainWhId:r.main_wh_id,warehouseIds:r.warehouse_ids||[]}));
+        this._sync(groups); return groups;
+      }
+    }catch(e){ console.warn('whGroupSvc.loadAll:',e.message); }
+    return this.getAll();
+  },
+  async create(d){
+    const row=await sb.insert('warehouse_groups',{
+      name:d.name,description:d.description||'',
+      main_wh_id:d.mainWhId,warehouse_ids:d.warehouseIds||[]});
+    const g={id:row.id,name:d.name,description:d.description||'',
+      mainWhId:d.mainWhId,warehouseIds:d.warehouseIds||[]};
+    await this.loadAll();
+    // Assign groupId to warehouses
+    if(d.warehouseIds)d.warehouseIds.forEach(wid=>this.assignWH(row.id,wid));
     return g;
   },
-  update:(id,d)=>{
-    const groups=whGroupSvc.getAll().map(g=>g.id===id?{...g,...d}:g);
-    whGroupSvc.save(groups);
+  async update(id,d){
+    await sb.update('warehouse_groups',`id=eq.${id}`,{
+      name:d.name,description:d.description||'',
+      main_wh_id:d.mainWhId,warehouse_ids:d.warehouseIds||[]});
+    await this.loadAll();
   },
-  delete:(id)=>{
-    // Remove groupId from all warehouses in this group
-    const whs=db.g('warehouses')||SEED.warehouses;
-    db.s('warehouses',whs.map(w=>w.groupId===id?{...w,groupId:null}:w));
-    if(whSvc._cache)whSvc._cache=whSvc._cache.map(w=>w.groupId===id?{...w,groupId:null}:w);
-    whGroupSvc.save(whGroupSvc.getAll().filter(g=>g.id!==id));
+  async delete(id){
+    // Unassign all warehouses from this group
+    this.getWHsInGroup(id).forEach(w=>this.removeWH(w.id));
+    await sb.delete('warehouse_groups',`id=eq.${id}`);
+    await this.loadAll();
   },
-  assignWH:(groupId,whId)=>{
-    const whs=db.g('warehouses')||SEED.warehouses;
-    db.s('warehouses',whs.map(w=>w.id===whId?{...w,groupId}:w));
+  assignWH(groupId,whId){
     if(whSvc._cache)whSvc._cache=whSvc._cache.map(w=>w.id===whId?{...w,groupId}:w);
+    const whs=db.g('warehouses')||[]; db.s('warehouses',whs.map(w=>w.id===whId?{...w,groupId}:w));
   },
-  removeWH:(whId)=>{
-    const whs=db.g('warehouses')||SEED.warehouses;
-    db.s('warehouses',whs.map(w=>w.id===whId?{...w,groupId:null}:w));
+  removeWH(whId){
     if(whSvc._cache)whSvc._cache=whSvc._cache.map(w=>w.id===whId?{...w,groupId:null}:w);
+    const whs=db.g('warehouses')||[]; db.s('warehouses',whs.map(w=>w.id===whId?{...w,groupId:null}:w));
   },
-  getWHsInGroup:(groupId)=>whSvc.getAll().filter(w=>w.groupId===groupId),
-  getUngrouped:()=>whSvc.getAll().filter(w=>!w.groupId),
+  getWHsInGroup(groupId){ return whSvc.getAll().filter(w=>w.groupId===groupId); },
+  getUngrouped(){ return whSvc.getAll().filter(w=>!w.groupId); },
 };
 
 
@@ -1436,6 +1484,8 @@ function Provider({children}){
           itemSvc.loadAll(),
           stockSvc.loadAll(),
           userSvc.loadAll(),
+          catSvc.loadAll(),
+          whGroupSvc.loadAll(),
         ]);
         // Load transaction data
         await Promise.all([
@@ -1471,7 +1521,7 @@ function Provider({children}){
     try {
       const whId2=userSvc.session()?.role==='Super Admin'?null:userSvc.session()?.whId||null;
       await Promise.all([
-        itemSvc.loadAll(), stockSvc.loadAll(),
+        itemSvc.loadAll(), stockSvc.loadAll(), catSvc.loadAll(),
         grvSvc.loadAll(whId2), givSvc.loadAll(whId2),
         trnSvc.loadAll(whId2), conSvc.loadAll(whId2),
         proSvc.loadAll(whId2), mrSvc.loadAll(whId2), dmgSvc.loadAll(whId2),
@@ -2427,17 +2477,16 @@ function Warehouses(){
               React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>setModal(React.createElement(GroupForm,{
                 initial:group,
                 onClose:()=>setModal(null),
-                onSave:(d)=>{
-                  whGroupSvc.update(group.id,{name:d.name,description:d.description,mainWhId:d.mainWhId});
-                  // Re-assign warehouses
+                onSave:async(d)=>{
+                  await whGroupSvc.update(group.id,{name:d.name,description:d.description,mainWhId:d.mainWhId,warehouseIds:d.warehouseIds||[]});
                   whGroupSvc.getWHsInGroup(group.id).forEach(w=>whGroupSvc.removeWH(w.id));
                   d.warehouseIds.forEach(wid=>whGroupSvc.assignWH(group.id,wid));
                   toast('Group updated','success');reloadAll();setModal(null);
                 }
               }))},'✏️ Edit'),
-              React.createElement('button',{className:'btn btn-danger btn-sm',onClick:()=>{
+              React.createElement('button',{className:'btn btn-danger btn-sm',onClick:async()=>{
                 if(window.confirm('Delete group "'+group.name+'"? Warehouses will not be deleted, just ungrouped.')){
-                  whGroupSvc.delete(group.id);toast('Group deleted','success');reloadAll();
+                  await whGroupSvc.delete(group.id);toast('Group deleted','success');reloadAll();
                 }
               }},'🗑️')
             )
@@ -2466,7 +2515,7 @@ function Warehouses(){
                     onSave:async d=>{await whSvc.update(wh.id,d);toast('Updated','success');reloadAll();setModal(null);}
                   }))},React.createElement(Ic,{n:'edit',s:11})),
                   !isMain&&React.createElement('button',{className:'btn btn-outline btn-xs',style:{fontSize:10},onClick:()=>{
-                    whGroupSvc.update(group.id,{mainWhId:wh.id});toast(wh.name+' set as main','success');reloadAll();
+                    whGroupSvc.update(group.id,{...whGroupSvc.getById(group.id),mainWhId:wh.id}).then(()=>{toast(wh.name+' set as main','success');reloadAll();});
                   }},'Set Main')
                 )
               );
@@ -2865,7 +2914,7 @@ function Categories(){
   }; // selected category for drill-down
   const [subFilter,setSubFilter]=useState('');  // sub-category filter in detail
   const [q,setQ]=useState('');
-  const reloadCats=()=>{refreshCATS();setCats(catSvc.getAll());reload();};
+  const reloadCats=async()=>{await catSvc.loadAll();refreshCATS();setCats(catSvc.getAll());reload();};
 
   const ICONS=['📦','⚙️','⚡','📡','🛡️','🔧','🏭','🔬','💡','🪛','🔩','🏗️','🧪','🔋','📋','🗜️','🪝','💎','🔌','🧲'];
   const COLORS=[
@@ -3074,9 +3123,9 @@ function Categories(){
         React.createElement('p',null,String(rootCats.length)+' categories · '+String(cats.filter(c=>!!c.parentId).length)+' sub-categories · click a card to see items')
       ),
       isSA&&React.createElement('div',{className:'ph-r'},
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(CatForm,{
+        React.createElement('button',{className:'btn btn-primary',onClick:async()=>setModal(React.createElement(CatForm,{
           onClose:()=>setModal(null),
-          onSave:async(d)=>{catSvc.create(d);toast('"'+d.name+'" added','success');reloadCats();setModal(null);}
+          onSave:async(d)=>{await catSvc.create(d);toast('"'+d.name+'" added','success');await reloadCats();setModal(null);}
         }))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Category')
       )
     ),
@@ -3110,10 +3159,10 @@ function Categories(){
                     onSave:async(d)=>{catSvc.update(cat.id,d);toast('Updated','success');reloadCats();setModal(null);}
                   }))},React.createElement(Ic,{n:'edit',s:12})),
                 !DEFAULT_CAT_IDS.includes(cat.id)&&React.createElement('button',{className:'btn btn-danger btn-icon btn-sm',title:'Delete',
-                  onClick:()=>{
+                  onClick:async()=>{
                     if(catItems.length>0){toast('Cannot delete — '+catItems.length+' items use this category','error');return;}
                     if(subCats.length>0){toast('Delete sub-categories first','error');return;}
-                    if(window.confirm('Delete "'+cat.name+'"?')){catSvc.delete(cat.id);toast('Deleted','success');reloadCats();}
+                    if(window.confirm('Delete "'+cat.name+'"?')){await catSvc.delete(cat.id);toast('Deleted','success');await reloadCats();}
                   }},React.createElement(Ic,{n:'trash',s:12}))
               )
             ),
@@ -3171,7 +3220,7 @@ function Categories(){
               style:{width:'100%',borderStyle:'dashed',color:cat.color,borderColor:cat.color+'66'},
               onClick:e=>{e.stopPropagation();setModal(React.createElement(CatForm,{
                 parentCat:cat,onClose:()=>setModal(null),
-                onSave:async(d)=>{catSvc.create({...d,parentId:cat.id});toast('Sub-category added','success');reloadCats();setModal(null);}
+                onSave:async(d)=>{await catSvc.create({...d,parentId:cat.id});toast('Sub-category added','success');await reloadCats();setModal(null);}
               }));}
             },React.createElement(Ic,{n:'plus',s:12}),' Add Sub-Category to ',cat.short),
 
