@@ -7356,7 +7356,9 @@ function BulkUploadModal({whId,onDone,onClose}){
       const minStock=Number(g(iMinStock))||0;
       const openingQty=Number(g(iQty))||0;
       const isAssetBool=(g(iAsset)||'').toUpperCase()==='YES';
-      const assetCode=g(iAssetCode)||'';
+      // Auto-generate asset code if asset but no code provided
+      const rawAssetCode=g(iAssetCode)||'';
+      const assetCode=rawAssetCode||(isAssetBool?'ASSET-'+Date.now().toString(36).toUpperCase().slice(-6):'');
       const desc=g(iDesc)||'';
       const rackCode=g(iRack)||'';
       const rack=allRacks.find(r=>r.code===rackCode)||null;
@@ -7417,8 +7419,11 @@ function BulkUploadModal({whId,onDone,onClose}){
           // Item exists — just update its stock
           await stockSvc.setQty(existing.id,existing.whId,Number(row.openingQty||0));
         } else {
+          // Auto-generate asset code at import time if still missing
+          const importRow={...row,costPrice:Number(row.costPrice||0),minStock:Number(row.minStock||0),openingQty:Number(row.openingQty||0)};
+          if(importRow.isAsset&&!importRow.assetCode)importRow.assetCode='ASSET-'+String(i+1).padStart(4,'0');
           // New item — create in all warehouses
-          await itemSvc.create({...row,costPrice:Number(row.costPrice||0),minStock:Number(row.minStock||0),openingQty:Number(row.openingQty||0)});
+          await itemSvc.create(importRow);
         }
         count++;
         setImportProgress(Math.round((i+1)/rows.length*100));
