@@ -384,6 +384,7 @@ const sbFetch = async (path, opts={}) => {
       'apikey':         SB_ANON_KEY,
       'Authorization': `Bearer ${SB_ANON_KEY}`,
       'Prefer':        opts.prefer || 'return=representation',
+      'Range':         '0-9999',   // fetch up to 10,000 rows (override default 1000 limit)
       ...(opts.headers||{}),
     },
   });
@@ -947,10 +948,35 @@ const itemSvc = {
   _cache: null,
   async loadAll() {
     try {
-      const rows = await sb.select('items', '', 'order=code.asc');
-      this._cache = rows.map(mapItem);
-      db.s('items', this._cache);
-    } catch { this._cache = db.g('items') || SEED.items; }
+      // Paginate to handle large datasets (60 WHs × 105 items = 6300+ rows)
+      let all = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const res = await fetch(`${SB_URL}/rest/v1/items?order=code.asc`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SB_ANON_KEY,
+            'Authorization': `Bearer ${SB_ANON_KEY}`,
+            'Range': `${from}-${from + pageSize - 1}`,
+            'Prefer': 'count=none',
+          }
+        });
+        if (!res.ok) break;
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0) break;
+        all = all.concat(rows.map(mapItem));
+        if (rows.length < pageSize) break;
+        from += pageSize;
+      }
+      if (all.length > 0) {
+        this._cache = all;
+        db.s('items', this._cache);
+      }
+    } catch(e) {
+      console.warn('itemSvc.loadAll:', e.message);
+      this._cache = db.g('items') || SEED.items;
+    }
     return this._cache;
   },
   getAll(whId) {
@@ -1043,10 +1069,34 @@ const stockSvc = {
   _cache: null,
   async loadAll() {
     try {
-      const rows = await sb.select('stock');
-      this._cache = rows.map(mapStock);
-      db.s('stock', this._cache);
-    } catch { this._cache = db.g('stock') || SEED.stock; }
+      let all = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (true) {
+        const res = await fetch(`${SB_URL}/rest/v1/stock`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SB_ANON_KEY,
+            'Authorization': `Bearer ${SB_ANON_KEY}`,
+            'Range': `${from}-${from + pageSize - 1}`,
+            'Prefer': 'count=none',
+          }
+        });
+        if (!res.ok) break;
+        const rows = await res.json();
+        if (!Array.isArray(rows) || rows.length === 0) break;
+        all = all.concat(rows.map(mapStock));
+        if (rows.length < pageSize) break;
+        from += pageSize;
+      }
+      if (all.length > 0) {
+        this._cache = all;
+        db.s('stock', this._cache);
+      }
+    } catch(e) {
+      console.warn('stockSvc.loadAll:', e.message);
+      this._cache = db.g('stock') || SEED.stock;
+    }
     return this._cache;
   },
   getAll(whId) {
