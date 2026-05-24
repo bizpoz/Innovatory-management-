@@ -948,45 +948,34 @@ const itemSvc = {
   _cache: null,
   async loadAll(whId) {
     try {
-      // For SA viewing all WHs: paginate. For specific WH: simple filter (fast)
-      const filter = whId ? `warehouse_id=eq.${whId}` : null;
-      let all = [];
-      let from = 0;
-      const pageSize = 1000;
-      while (true) {
-        const params = ['order=code.asc'];
-        if (filter) params.push(filter);
-        const res = await fetch(`${SB_URL}/rest/v1/items?${params.join('&')}`, {
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': SB_ANON_KEY,
-            'Authorization': `Bearer ${SB_ANON_KEY}`,
-            'Range': `${from}-${from + pageSize - 1}`,
-            'Prefer': 'count=none',
-          }
-        });
-        if (!res.ok) break;
-        const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0) break;
-        all = all.concat(rows.map(mapItem));
-        if (rows.length < pageSize) break;
-        from += pageSize;
-      }
-      if (all.length > 0) {
-        if (whId) {
-          // Merge into cache: replace rows for this WH, keep others
-          const existing = this._cache ? this._cache.filter(i => i.whId !== whId) : [];
-          this._cache = [...existing, ...all];
-        } else {
-          this._cache = all;
+      // Fast single query — filter by WH if specified
+      const q = whId ? `warehouse_id=eq.${whId}&order=code.asc` : `order=code.asc`;
+      const res = await fetch(`${SB_URL}/rest/v1/items?${q}`, {
+        headers: {
+          'apikey': SB_ANON_KEY,
+          'Authorization': `Bearer ${SB_ANON_KEY}`,
+          'Range': '0-9999',
+          'Prefer': 'count=none',
         }
-        db.s('items', this._cache);
+      });
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mapped = rows.map(mapItem);
+          if (whId) {
+            const existing = this._cache ? this._cache.filter(i => i.whId !== whId) : [];
+            this._cache = [...existing, ...mapped];
+          } else {
+            this._cache = mapped;
+          }
+          db.s('items', this._cache);
+        }
       }
     } catch(e) {
       console.warn('itemSvc.loadAll:', e.message);
       if (!this._cache) this._cache = db.g('items') || SEED.items;
     }
-    return this._cache;
+    return this._cache || [];
   },
   getAll(whId) {
     const all = this._cache || db.g('items') || SEED.items;
@@ -998,20 +987,53 @@ const itemSvc = {
     const all = this.getAll();
     const seen = new Map();
     for (const item of all) {
-      if (!seen.has(item.code||item.name)) {
-        seen.set(item.code||item.name, item);
-      }
+      const key = item.code||item.name;
+      if (!seen.has(key)) seen.set(key, item);
     }
     return Array.from(seen.values());
+  },
+  // Fast load: only fetch items from ONE warehouse (for SA catalog)
+  // Much faster than loading all 6300 rows — gives 105 unique items
+  async loadUnique() {
+    try {
+      // Get first warehouse to use as reference
+      const whs = whSvc.getAll();
+      if (!whs.length) return [];
+      const firstWh = whs[0];
+      const res = await fetch(
+        `${SB_URL}/rest/v1/items?warehouse_id=eq.${firstWh.id}&order=name.asc`,
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mapped = rows.map(mapItem);
+          // Merge into cache without losing other WH data
+          if (this._cache) {
+            const otherWH = this._cache.filter(i => i.whId !== firstWh.id);
+            this._cache = [...otherWH, ...mapped];
+          } else {
+            this._cache = mapped;
+          }
+          db.s('items', this._cache);
+          return mapped;
+        }
+      }
+    } catch(e) { console.warn('loadUnique:', e.message); }
+    return this.getUnique();
   },
   // Get all warehouse copies of an item by code
   getAllByCode(code) {
     return this.getAll().filter(i=>i.code===code||(i.name===code));
   },
-  // Get total stock qty across all warehouses for an item
+  // Get total stock qty across all warehouses for an item (uses cached stock)
   getTotalStock(code) {
     const copies = this.getAllByCode(code);
-    return copies.reduce((sum,i)=>sum+stockSvc.getQty(i.id,i.whId),0);
+    const stockCache = stockSvc._cache || db.g('stock') || [];
+    return copies.reduce((sum, i) => {
+      const s = stockCache.find(s => s.itemId === i.id);
+      return sum + (s?.qty || 0);
+    }, 0);
   },
   // Get per-warehouse stock for an item code
   getStockByWH(code) {
@@ -1106,42 +1128,33 @@ const stockSvc = {
   _cache: null,
   async loadAll(whId) {
     try {
-      const filter = whId ? `warehouse_id=eq.${whId}` : '';
-      let all = [];
-      let from = 0;
-      const pageSize = 1000;
-      while (true) {
-        const url = `${SB_URL}/rest/v1/stock${filter?'?'+filter:''}`;
-        const res = await fetch(url, {
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': SB_ANON_KEY,
-            'Authorization': `Bearer ${SB_ANON_KEY}`,
-            'Range': `${from}-${from + pageSize - 1}`,
-            'Prefer': 'count=none',
-          }
-        });
-        if (!res.ok) break;
-        const rows = await res.json();
-        if (!Array.isArray(rows) || rows.length === 0) break;
-        all = all.concat(rows.map(mapStock));
-        if (rows.length < pageSize) break;
-        from += pageSize;
-      }
-      if (all.length > 0) {
-        if (whId) {
-          const existing = this._cache ? this._cache.filter(s => s.whId !== whId) : [];
-          this._cache = [...existing, ...all];
-        } else {
-          this._cache = all;
+      const q = whId ? `warehouse_id=eq.${whId}` : '';
+      const res = await fetch(`${SB_URL}/rest/v1/stock${q?'?'+q:''}`, {
+        headers: {
+          'apikey': SB_ANON_KEY,
+          'Authorization': `Bearer ${SB_ANON_KEY}`,
+          'Range': '0-9999',
+          'Prefer': 'count=none',
         }
-        db.s('stock', this._cache);
+      });
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mapped = rows.map(mapStock);
+          if (whId) {
+            const existing = this._cache ? this._cache.filter(s => s.whId !== whId) : [];
+            this._cache = [...existing, ...mapped];
+          } else {
+            this._cache = mapped;
+          }
+          db.s('stock', this._cache);
+        }
       }
     } catch(e) {
       console.warn('stockSvc.loadAll:', e.message);
       if (!this._cache) this._cache = db.g('stock') || SEED.stock;
     }
-    return this._cache;
+    return this._cache || [];
   },
   getAll(whId) {
     const all = this._cache || db.g('stock') || SEED.stock;
@@ -1585,14 +1598,19 @@ function Provider({children}){
           catSvc.loadAll(),
           whGroupSvc.loadAll(),
         ]);
-        // Load items/stock for current user's warehouse only (fast startup)
-        // SA loads all WHs lazily; store users load just their WH
+        // Fast startup: SA loads unique items from one WH (catalog view)
+        // Store users load just their WH
         const sessionUser = userSvc.session();
-        const initWhId = (sessionUser?.role !== 'Super Admin') ? sessionUser?.whId || null : null;
-        await Promise.all([
-          itemSvc.loadAll(initWhId),
-          stockSvc.loadAll(initWhId),
-        ]);
+        if (sessionUser?.role === 'Super Admin') {
+          await itemSvc.loadUnique(); // ~105 rows instead of 6300
+          // Stock loaded lazily when WH is selected
+        } else {
+          const initWhId = sessionUser?.whId || null;
+          await Promise.all([
+            itemSvc.loadAll(initWhId),
+            stockSvc.loadAll(initWhId),
+          ]);
+        }
         // Load transaction data
         await Promise.all([
           grvSvc.loadAll(),
@@ -1627,7 +1645,7 @@ function Provider({children}){
     try {
       const whId2=userSvc.session()?.role==='Super Admin'?null:userSvc.session()?.whId||null;
       await Promise.all([
-        itemSvc.loadAll(whId2), stockSvc.loadAll(whId2), catSvc.loadAll(),
+        (whId2?itemSvc.loadAll(whId2):itemSvc.loadUnique()), stockSvc.loadAll(whId2), catSvc.loadAll(),
         grvSvc.loadAll(whId2), givSvc.loadAll(whId2),
         trnSvc.loadAll(whId2), conSvc.loadAll(whId2),
         proSvc.loadAll(whId2), mrSvc.loadAll(whId2), dmgSvc.loadAll(whId2),
