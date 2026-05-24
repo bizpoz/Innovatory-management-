@@ -377,6 +377,8 @@ const SB_URL = 'https://cionoqjomadpalyyufdd.supabase.co';
 const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNpb25vcWpvbWFkcGFseXl1ZmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1MjA0OTUsImV4cCI6MjA5NDA5NjQ5NX0.2Tv1uvUuh8DWeXwHfH_V7C56DWiijy57-xiVefCPers';
 
 const sbFetch = async (path, opts={}) => {
+  const method = opts.method || 'GET';
+  const isGet = method === 'GET';
   const res = await fetch(`${SB_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
@@ -384,7 +386,9 @@ const sbFetch = async (path, opts={}) => {
       'apikey':         SB_ANON_KEY,
       'Authorization': `Bearer ${SB_ANON_KEY}`,
       'Prefer':        opts.prefer || 'return=representation',
-      'Range':         '0-9999',   // fetch up to 10,000 rows (override default 1000 limit)
+      // Range header only on GET — never on POST/PATCH/DELETE
+      ...(isGet ? {'Range': '0-9999'} : {}),
+      // opts.headers last so callers can override (e.g. upsert Prefer)
       ...(opts.headers||{}),
     },
   });
@@ -1028,6 +1032,27 @@ const itemSvc = {
     }
     return [];
   },
+  // Load all warehouse copies of a specific item by code (for detail view)
+  async loadByCode(code) {
+    if (!code) return;
+    try {
+      const res = await fetch(
+        `${SB_URL}/rest/v1/items?code=eq.${encodeURIComponent(code)}`,
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mapped = rows.map(mapItem);
+          // Merge: replace any existing rows for this code, keep everything else
+          const existing = this._cache ? this._cache.filter(i => i.code !== code) : [];
+          this._cache = [...existing, ...mapped];
+          db.s('items', this._cache);
+          return mapped;
+        }
+      }
+    } catch(e) { console.warn('loadByCode:', e.message); }
+  },
   // Get catalog rows (for SA view)
   getCatalog() {
     return this._catalogCache || JSON.parse(localStorage.getItem('gs_catalog')||'[]');
@@ -1183,14 +1208,10 @@ const stockSvc = {
   },
   async setQty(itemId, whId, qty) {
     const safeQty = Math.max(0, qty);
-    // Use UPSERT — insert if not exists, update if exists
-    // on_conflict must be in the URL for PostgREST to handle properly
     await sbFetch(`stock?on_conflict=item_id,warehouse_id`, {
       method: 'POST',
-      prefer: 'return=minimal,resolution=merge-duplicates',
       headers: {
         'Prefer': 'return=minimal,resolution=merge-duplicates',
-        'Content-Type': 'application/json',
       },
       body: JSON.stringify({ item_id: itemId, warehouse_id: whId, qty: safeQty }),
     });
@@ -1210,6 +1231,30 @@ const stockSvc = {
     return all.filter(s => s.itemId === itemId);
   },
   // Update stock qty directly (for opening stock edit)
+  // Load stock for all warehouse copies of an item by code
+  async loadByCode(code) {
+    if (!code) return;
+    try {
+      // Get all item IDs for this code first
+      const itemIds = itemSvc.getAll().filter(i => i.code === code).map(i => i.id);
+      if (!itemIds.length) return;
+      // Fetch stock for all those item IDs in one query
+      const filter = itemIds.map(id => `item_id=eq.${id}`).join(',');
+      const res = await fetch(
+        `${SB_URL}/rest/v1/stock?or=(${filter})`,
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows)) {
+          const mapped = rows.map(mapStock);
+          const existing = this._cache ? this._cache.filter(s => !itemIds.includes(s.itemId)) : [];
+          this._cache = [...existing, ...mapped];
+          db.s('stock', this._cache);
+        }
+      }
+    } catch(e) { console.warn('stockSvc.loadByCode:', e.message); }
+  },
   async editOpeningStock(itemId, whId, newQty) {
     await this.setQty(itemId, whId, Math.max(0, Number(newQty)));
     await this.loadAll();
@@ -3676,8 +3721,9 @@ function Items(){
           ),
           React.createElement('div',{style:{padding:'4px 0'}},
             (isSA ? whSvc.getAll() : whSvc.getAll().filter(w=>w.id===whId)).map(wh=>{
-              const whStock=stockSvc.getQty(item.id,wh.id);
-              const whItem=itemSvc.getAll(wh.id).find(i=>i.id===item.id||(i.code===item.code&&i.name===item.name));
+              // For catalog items, find the actual item row for THIS warehouse
+              const whItem=itemSvc.getAll(wh.id).find(i=>i.code===item.code||(i.name===item.name&&i.whId===wh.id));
+              const whStock=whItem ? stockSvc.getQty(whItem.id, wh.id) : 0;
               const isHome=wh.id===item.whId;
               return React.createElement('div',{key:wh.id,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid var(--border)'}},
                 React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
@@ -3833,7 +3879,14 @@ function Items(){
               const low = totalQty <= item.minStock;
               const catIcon = CATS.find(cat=>cat.id===item.category)?.icon||'📦';
               return React.createElement('tr',{key:item.id,style:{cursor:'pointer'},
-                onClick:()=>setDetail(item)},
+                onClick:async()=>{
+                // For SA catalog items: lazy-load all warehouse copies of just this item
+                if(isSA && item._isCatalog) {
+                  await itemSvc.loadByCode(item.code);
+                  await stockSvc.loadByCode(item.code);
+                }
+                setDetail(item);
+              }},
                 // Photo
                 React.createElement('td',null,
                   item.photo
