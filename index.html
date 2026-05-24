@@ -993,6 +993,34 @@ const itemSvc = {
     return whId ? all.filter(i => i.whId === whId) : all;
   },
   getById(id) { return this.getAll().find(i => i.id === id); },
+  // Get unique items by code (for catalog view) - returns one row per unique item code
+  getUnique() {
+    const all = this.getAll();
+    const seen = new Map();
+    for (const item of all) {
+      if (!seen.has(item.code||item.name)) {
+        seen.set(item.code||item.name, item);
+      }
+    }
+    return Array.from(seen.values());
+  },
+  // Get all warehouse copies of an item by code
+  getAllByCode(code) {
+    return this.getAll().filter(i=>i.code===code||(i.name===code));
+  },
+  // Get total stock qty across all warehouses for an item
+  getTotalStock(code) {
+    const copies = this.getAllByCode(code);
+    return copies.reduce((sum,i)=>sum+stockSvc.getQty(i.id,i.whId),0);
+  },
+  // Get per-warehouse stock for an item code
+  getStockByWH(code) {
+    return this.getAllByCode(code).map(i=>({
+      wh: whSvc.getById(i.whId),
+      item: i,
+      qty: stockSvc.getQty(i.id,i.whId),
+    })).filter(r=>r.wh);
+  },
   nextCode(catId, whId) {
     const n = this.getAll(whId).filter(i => i.category === catId).length + 1;
     return `${catId}-${String(n).padStart(4,'0')}`;
@@ -1118,6 +1146,12 @@ const stockSvc = {
   getAll(whId) {
     const all = this._cache || db.g('stock') || SEED.stock;
     return whId ? all.filter(s => s.whId === whId) : all;
+  },
+  // Get total qty across ALL warehouses for an item code
+  getTotalByCode(code) {
+    const all = this._cache || db.g('stock') || SEED.stock;
+    const itemIds = itemSvc.getAll().filter(i=>i.code===code).map(i=>i.id);
+    return itemIds.reduce((sum,id)=>sum+(all.find(s=>s.itemId===id)?.qty||0),0);
   },
   getQty(itemId, whId) {
     const all = this._cache || db.g('stock') || SEED.stock;
@@ -3516,22 +3550,24 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
 function Items(){
   const {toast,setModal,whId,isSA,reload}=useCtx();
   const whs=whSvc.getAll();
-  const [items,setItems]=useState(itemSvc.getAll(whId));
+  // SA sees unique catalog (one row per item), non-SA sees their WH items
+  const [items,setItems]=useState(isSA ? itemSvc.getUnique() : itemSvc.getAll(whId));
   const [q,setQ]=useState('');
   const [catF,setCatF]=useState('');
-  const [whF,setWhF]=useState(whId||'');
-  const [assetF,setAssetF]=useState(''); // '' | 'asset' | 'non-asset'
+  const [whF,setWhF]=useState(whId||'');  // only used by non-SA
+  const [assetF,setAssetF]=useState('');
   const [detail,setDetail]=useState(null);
   const racks=rackSvc.getAll(whF||null);
   const sym=settSvc.get().currencySymbol||'QR';
-  const reloadItems=async()=>{await reload();setItems(itemSvc.getAll(whF||null));};
+  const reloadItems=async()=>{await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));};
 
   const filtered=useMemo(()=>items.filter(i=>{
     const mq=i.name.toLowerCase().includes(q.toLowerCase())||
               (i.code||'').toLowerCase().includes(q.toLowerCase())||
               (i.assetCode||'').toLowerCase().includes(q.toLowerCase());
     const mc=!catF||i.category===catF;
-    const mw=!whF||i.whId===whF;
+    // SA sees catalog (unique items) - no WH filter needed
+    const mw=isSA?true:(!whF||i.whId===whF);
     const ma=!assetF||(assetF==='asset'?!!i.isAsset:!i.isAsset);
     return mq&&mc&&mw&&ma;
   }),[items,q,catF,whF,assetF]);
@@ -3726,7 +3762,7 @@ function Items(){
       React.createElement('div',{className:'si'},React.createElement('div',{className:'si-ico'},React.createElement(Ic,{n:'search',s:13,c:'var(--txt3)'})),React.createElement('input',{placeholder:'Search name / code...',value:q,onChange:e=>setQ(e.target.value)})),
       React.createElement('select',{className:'fs',value:catF,onChange:e=>setCatF(e.target.value)},React.createElement('option',{value:''},'All Categories'),CATS.map(c=>React.createElement('option',{key:c.id,value:c.id},c.name))),
       React.createElement('select',{className:'fs',value:assetF,onChange:ev=>setAssetF(ev.target.value)},React.createElement('option',{value:''},'All Items'),React.createElement('option',{value:'asset'},'🏷 Assets Only'),React.createElement('option',{value:'non-asset'},'📦 Non-Assets')),
-      isSA&&React.createElement('select',{className:'fs',value:whF,onChange:async e=>{
+      !isSA&&React.createElement('select',{className:'fs',value:whF,onChange:async e=>{
               const newWh=e.target.value;
               setWhF(newWh);
               // Lazy-load this warehouse's items if not already cached
@@ -3745,42 +3781,70 @@ function Items(){
     React.createElement('div',{className:'tw'},
       React.createElement('table',null,
         React.createElement('thead',null,React.createElement('tr',null,
-          ['Photo','Item Name','Category',isSA&&'Warehouse','Rack','Unit','Stock','Min','Rate','Status',''].filter(Boolean).map(h=>React.createElement('th',{key:h},h))
+          (isSA
+            ? ['Photo','Item Name','Category','Unit','Total Stock','In Stock WHs','Rate','Status','']
+            : ['Photo','Item Name','Category','Rack','Unit','Stock','Min','Rate','Status','']
+          ).map(h=>React.createElement('th',{key:h},h))
         )),
         React.createElement('tbody',null,
           filtered.length===0
-            ? React.createElement('tr',null,React.createElement('td',{colSpan:11},React.createElement('div',{className:'te'},'No items found')))
+            ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No items found')))
             : filtered.map(item=>{
-              const rack=racks.find(r=>r.id===item.rackId);
-              const qty=stockSvc.getQty(item.id,item.whId);
-              const low=qty<=item.minStock;
+              const totalQty = isSA ? itemSvc.getTotalStock(item.code||item.name) : stockSvc.getQty(item.id,item.whId);
+              const whsWithStock = isSA ? itemSvc.getStockByWH(item.code||item.name).filter(r=>r.qty>0) : null;
+              const rack = isSA ? null : racks.find(r=>r.id===item.rackId);
+              const low = totalQty <= item.minStock;
+              const catIcon = CATS.find(cat=>cat.id===item.category)?.icon||'📦';
               return React.createElement('tr',{key:item.id,style:{cursor:'pointer'},
                 onClick:()=>setDetail(item)},
+                // Photo
                 React.createElement('td',null,
                   item.photo
                     ? React.createElement('img',{src:item.photo,className:'item-photo',alt:item.name,style:{width:36,height:36,borderRadius:6,objectFit:'cover',border:'1px solid var(--border)'}})
-                    : React.createElement('div',{style:{width:36,height:36,borderRadius:6,background:'var(--off2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}},CATS.find(cat=>cat.id===item.category)?.icon||'📦')
+                    : React.createElement('div',{style:{width:36,height:36,borderRadius:6,background:'var(--off2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}},catIcon)
                 ),
+                // Name
                 React.createElement('td',null,
                   React.createElement('div',{style:{fontWeight:600}},item.name),
-                  item.isAsset&&React.createElement('div',{style:{fontSize:10,color:'#c2410c',fontWeight:600,marginTop:2}},'🏷 ',item.assetCode||'Asset')
+                  item.isAsset&&React.createElement('div',{style:{fontSize:10,color:'#c2410c',fontWeight:600,marginTop:2}},'🏷 ',item.assetCode||'Asset'),
+                  item.code&&React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:'var(--txt3)',marginTop:1}},item.code)
                 ),
+                // Category
                 React.createElement('td',null,
                   React.createElement(CatBadge,{catId:item.category}),
-                  item.subCategory&&React.createElement('div',{style:{marginTop:3}},
-                    React.createElement(CatBadge,{catId:item.subCategory})
+                  item.subCategory&&React.createElement('div',{style:{marginTop:3}},React.createElement(CatBadge,{catId:item.subCategory}))
+                ),
+                // Rack (non-SA) or nothing (SA)
+                !isSA&&React.createElement('td',null,rack?React.createElement('span',{style:{color:'var(--blue)',fontFamily:'var(--mono)',fontSize:11}},rack.code):'-'),
+                // Unit
+                React.createElement('td',null,item.unit),
+                // Stock
+                React.createElement('td',null,
+                  React.createElement('div',{style:{fontWeight:800,fontSize:14,color:low?'var(--red)':totalQty>0?'var(--green)':'var(--txt3)'}},String(totalQty),' ',item.unit),
+                  low&&React.createElement('div',{style:{fontSize:9,color:'var(--red)',fontWeight:600}},'⚠ LOW'),
+                  isSA&&whsWithStock&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:2}},
+                    String(whsWithStock.length)+' / '+String(itemSvc.getAllByCode(item.code||item.name).length)+' WHs'
                   )
                 ),
-                isSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:item.whId})),
-                React.createElement('td',null,rack?React.createElement('span',{style:{color:'var(--blue)',fontFamily:'var(--mono)',fontSize:11}},rack.code):'-'),
-                React.createElement('td',null,item.unit),
-                React.createElement('td',null,React.createElement('span',{style:{fontWeight:700,color:low?'var(--red)':'var(--green)'}},String(qty),' ',item.unit)),
-                React.createElement('td',null,String(item.minStock)),
+                // Min (non-SA only)
+                !isSA&&React.createElement('td',null,String(item.minStock)),
+                // Rate
                 React.createElement('td',null,sym+' '+fmt(item.costPrice)),
+                // Status
                 React.createElement('td',null,React.createElement('span',{className:'sdot '+(item.status==='Active'?'active':'inactive')},item.status)),
+                // Actions
                 React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                  React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{initial:item,whIdCtx:item.whId,onClose:()=>setModal(null),onSave:async d=>{await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});toast('Updated','success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'edit',s:12})),
-                  React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Item',text:'Delete "'+item.name+'"?',onCancel:()=>setModal(null),onOk:async()=>{await itemSvc.delete(item.id);toast('Deleted','success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'trash',s:12}))
+                  React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{initial:item,whIdCtx:item.whId,onClose:()=>setModal(null),onSave:async d=>{await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});toast('Updated','success');await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'edit',s:12})),
+                  React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Item',text:'Delete "'+item.name+'" from all warehouses?',onCancel:()=>setModal(null),onOk:async()=>{
+                    // SA: delete from all warehouses
+                    if(isSA){
+                      const copies=itemSvc.getAllByCode(item.code||item.name);
+                      for(const copy of copies) await itemSvc.delete(copy.id);
+                    } else {
+                      await itemSvc.delete(item.id);
+                    }
+                    toast('Deleted','success');await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));setModal(null);
+                  }}))},React.createElement(Ic,{n:'trash',s:12}))
                 ))
               );
             })
