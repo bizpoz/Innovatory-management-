@@ -946,14 +946,17 @@ const supplierSvc = {
 // ── ITEM SERVICE ──
 const itemSvc = {
   _cache: null,
-  async loadAll() {
+  async loadAll(whId) {
     try {
-      // Paginate to handle large datasets (60 WHs × 105 items = 6300+ rows)
+      // For SA viewing all WHs: paginate. For specific WH: simple filter (fast)
+      const filter = whId ? `warehouse_id=eq.${whId}` : null;
       let all = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
-        const res = await fetch(`${SB_URL}/rest/v1/items?order=code.asc`, {
+        const params = ['order=code.asc'];
+        if (filter) params.push(filter);
+        const res = await fetch(`${SB_URL}/rest/v1/items?${params.join('&')}`, {
           headers: {
             'Content-Type': 'application/json',
             'apikey': SB_ANON_KEY,
@@ -970,12 +973,18 @@ const itemSvc = {
         from += pageSize;
       }
       if (all.length > 0) {
-        this._cache = all;
+        if (whId) {
+          // Merge into cache: replace rows for this WH, keep others
+          const existing = this._cache ? this._cache.filter(i => i.whId !== whId) : [];
+          this._cache = [...existing, ...all];
+        } else {
+          this._cache = all;
+        }
         db.s('items', this._cache);
       }
     } catch(e) {
       console.warn('itemSvc.loadAll:', e.message);
-      this._cache = db.g('items') || SEED.items;
+      if (!this._cache) this._cache = db.g('items') || SEED.items;
     }
     return this._cache;
   },
@@ -1067,13 +1076,15 @@ const itemSvc = {
 // ── STOCK SERVICE ──
 const stockSvc = {
   _cache: null,
-  async loadAll() {
+  async loadAll(whId) {
     try {
+      const filter = whId ? `warehouse_id=eq.${whId}` : '';
       let all = [];
       let from = 0;
       const pageSize = 1000;
       while (true) {
-        const res = await fetch(`${SB_URL}/rest/v1/stock`, {
+        const url = `${SB_URL}/rest/v1/stock${filter?'?'+filter:''}`;
+        const res = await fetch(url, {
           headers: {
             'Content-Type': 'application/json',
             'apikey': SB_ANON_KEY,
@@ -1090,12 +1101,17 @@ const stockSvc = {
         from += pageSize;
       }
       if (all.length > 0) {
-        this._cache = all;
+        if (whId) {
+          const existing = this._cache ? this._cache.filter(s => s.whId !== whId) : [];
+          this._cache = [...existing, ...all];
+        } else {
+          this._cache = all;
+        }
         db.s('stock', this._cache);
       }
     } catch(e) {
       console.warn('stockSvc.loadAll:', e.message);
-      this._cache = db.g('stock') || SEED.stock;
+      if (!this._cache) this._cache = db.g('stock') || SEED.stock;
     }
     return this._cache;
   },
@@ -1531,11 +1547,17 @@ function Provider({children}){
           whSvc.loadAll(),
           rackSvc.loadAll(),
           supplierSvc.loadAll(),
-          itemSvc.loadAll(),
-          stockSvc.loadAll(),
           userSvc.loadAll(),
           catSvc.loadAll(),
           whGroupSvc.loadAll(),
+        ]);
+        // Load items/stock for current user's warehouse only (fast startup)
+        // SA loads all WHs lazily; store users load just their WH
+        const sessionUser = userSvc.session();
+        const initWhId = (sessionUser?.role !== 'Super Admin') ? sessionUser?.whId || null : null;
+        await Promise.all([
+          itemSvc.loadAll(initWhId),
+          stockSvc.loadAll(initWhId),
         ]);
         // Load transaction data
         await Promise.all([
@@ -1571,7 +1593,7 @@ function Provider({children}){
     try {
       const whId2=userSvc.session()?.role==='Super Admin'?null:userSvc.session()?.whId||null;
       await Promise.all([
-        itemSvc.loadAll(), stockSvc.loadAll(), catSvc.loadAll(),
+        itemSvc.loadAll(whId2), stockSvc.loadAll(whId2), catSvc.loadAll(),
         grvSvc.loadAll(whId2), givSvc.loadAll(whId2),
         trnSvc.loadAll(whId2), conSvc.loadAll(whId2),
         proSvc.loadAll(whId2), mrSvc.loadAll(whId2), dmgSvc.loadAll(whId2),
@@ -3704,7 +3726,16 @@ function Items(){
       React.createElement('div',{className:'si'},React.createElement('div',{className:'si-ico'},React.createElement(Ic,{n:'search',s:13,c:'var(--txt3)'})),React.createElement('input',{placeholder:'Search name / code...',value:q,onChange:e=>setQ(e.target.value)})),
       React.createElement('select',{className:'fs',value:catF,onChange:e=>setCatF(e.target.value)},React.createElement('option',{value:''},'All Categories'),CATS.map(c=>React.createElement('option',{key:c.id,value:c.id},c.name))),
       React.createElement('select',{className:'fs',value:assetF,onChange:ev=>setAssetF(ev.target.value)},React.createElement('option',{value:''},'All Items'),React.createElement('option',{value:'asset'},'🏷 Assets Only'),React.createElement('option',{value:'non-asset'},'📦 Non-Assets')),
-      isSA&&React.createElement('select',{className:'fs',value:whF,onChange:e=>{setWhF(e.target.value);setItems(itemSvc.getAll(e.target.value||null));}},React.createElement('option',{value:''},'All Warehouses'),whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name)))
+      isSA&&React.createElement('select',{className:'fs',value:whF,onChange:async e=>{
+              const newWh=e.target.value;
+              setWhF(newWh);
+              // Lazy-load this warehouse's items if not already cached
+              if(newWh&&!itemSvc.getAll(newWh).length){
+                await itemSvc.loadAll(newWh);
+                await stockSvc.loadAll(newWh);
+              }
+              setItems(itemSvc.getAll(newWh||null));
+            }},React.createElement('option',{value:''},'All Warehouses'),whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name)))
     ),
     React.createElement('div',{style:{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}},
       React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>printAssetLabels(filtered.filter(i=>i.isAsset)),title:'Print asset labels for filtered assets'},'🏷 Print Asset Labels ('+String(filtered.filter(i=>i.isAsset).length)+')'),
