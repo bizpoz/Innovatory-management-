@@ -992,35 +992,45 @@ const itemSvc = {
     }
     return Array.from(seen.values());
   },
-  // Fast load: only fetch items from ONE warehouse (for SA catalog)
-  // Much faster than loading all 6300 rows — gives 105 unique items
+  // Fast SA catalog load — uses v_item_catalog view (1 query, 105 rows, correct totals)
   async loadUnique() {
     try {
-      // Get first warehouse to use as reference
-      const whs = whSvc.getAll();
-      if (!whs.length) return [];
-      const firstWh = whs[0];
       const res = await fetch(
-        `${SB_URL}/rest/v1/items?warehouse_id=eq.${firstWh.id}&order=name.asc`,
+        `${SB_URL}/rest/v1/v_item_catalog?order=name.asc`,
         { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
       );
       if (res.ok) {
         const rows = await res.json();
         if (Array.isArray(rows) && rows.length > 0) {
-          const mapped = rows.map(mapItem);
-          // Merge into cache without losing other WH data
-          if (this._cache) {
-            const otherWH = this._cache.filter(i => i.whId !== firstWh.id);
-            this._cache = [...otherWH, ...mapped];
-          } else {
-            this._cache = mapped;
-          }
-          db.s('items', this._cache);
-          return mapped;
+          // Map catalog view rows — store as virtual items with aggregated stock
+          this._catalogCache = rows.map(r => ({
+            id: r.id, code: r.code, name: r.name,
+            category: r.category, subCategory: r.sub_category||null,
+            unit: r.unit, costPrice: Number(r.cost_price)||0,
+            minStock: r.min_stock||0, status: r.status,
+            isAsset: !!r.is_asset, assetCode: r.asset_code||null,
+            photo: r.photo_url||null, description: r.description||null,
+            totalStock: Number(r.total_stock)||0,
+            warehouseCount: Number(r.warehouse_count)||0,
+            warehousesWithStock: Number(r.warehouses_with_stock)||0,
+            whId: null, // catalog row — not tied to one WH
+            _isCatalog: true,
+          }));
+          localStorage.setItem('gs_catalog', JSON.stringify(this._catalogCache));
+          return this._catalogCache;
         }
       }
-    } catch(e) { console.warn('loadUnique:', e.message); }
-    return this.getUnique();
+    } catch(e) {
+      console.warn('loadUnique:', e.message);
+      // Fallback: try local catalog cache
+      const cached = localStorage.getItem('gs_catalog');
+      if (cached) { this._catalogCache = JSON.parse(cached); return this._catalogCache; }
+    }
+    return [];
+  },
+  // Get catalog rows (for SA view)
+  getCatalog() {
+    return this._catalogCache || JSON.parse(localStorage.getItem('gs_catalog')||'[]');
   },
   // Get all warehouse copies of an item by code
   getAllByCode(code) {
@@ -3569,7 +3579,7 @@ function Items(){
   const {toast,setModal,whId,isSA,reload}=useCtx();
   const whs=whSvc.getAll();
   // SA sees unique catalog (one row per item), non-SA sees their WH items
-  const [items,setItems]=useState(isSA ? itemSvc.getUnique() : itemSvc.getAll(whId));
+  const [items,setItems]=useState(isSA ? itemSvc.getCatalog() : itemSvc.getAll(whId));
   const [q,setQ]=useState('');
   const [catF,setCatF]=useState('');
   const [whF,setWhF]=useState(whId||'');  // only used by non-SA
@@ -3577,7 +3587,7 @@ function Items(){
   const [detail,setDetail]=useState(null);
   const racks=rackSvc.getAll(whF||null);
   const sym=settSvc.get().currencySymbol||'QR';
-  const reloadItems=async()=>{await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));};
+  const reloadItems=async()=>{await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));};
 
   const filtered=useMemo(()=>items.filter(i=>{
     const mq=i.name.toLowerCase().includes(q.toLowerCase())||
@@ -3688,9 +3698,18 @@ function Items(){
                         if(whItem){
                           await stockSvc.editOpeningStock(whItem.id,wh.id,q2);
                         } else {
-                          // Create item in this warehouse first
-                          const newItem=await itemSvc.create({...item,whId:wh.id,openingQty:q2,id:undefined});
-                          await stockSvc.setQty(newItem.id,wh.id,q2);
+                          // Create item in this warehouse first (bypass duplicate check - same item different WH)
+                          _itemSubmitting=false;
+                          const payload={
+                            warehouse_id:wh.id, rack_id:null, code:item.code||null, name:item.name,
+                            description:item.description||null, category:item.category, unit:item.unit||'NOS',
+                            cost_price:Number(item.costPrice)||0, min_stock:Number(item.minStock)||0,
+                            status:item.status||'Active', opening_qty:q2,
+                            sub_category:item.subCategory||null, is_asset:!!item.isAsset,
+                            asset_code:item.assetCode||null, photo_url:item.photo||null,
+                          };
+                          const newRow=await sb.insert('items',payload);
+                          await stockSvc.setQty(newRow.id,wh.id,q2);
                         }
                         await reload();setItems(itemSvc.getAll(whF||null));
                         toast('Stock updated for '+wh.name,'success');
@@ -3808,8 +3827,8 @@ function Items(){
           filtered.length===0
             ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No items found')))
             : filtered.map(item=>{
-              const totalQty = isSA ? itemSvc.getTotalStock(item.code||item.name) : stockSvc.getQty(item.id,item.whId);
-              const whsWithStock = isSA ? itemSvc.getStockByWH(item.code||item.name).filter(r=>r.qty>0) : null;
+              const totalQty = isSA ? (item.totalStock||0) : stockSvc.getQty(item.id,item.whId);
+              const whsWithStock = isSA ? {length: item.warehousesWithStock||0} : null;
               const rack = isSA ? null : racks.find(r=>r.id===item.rackId);
               const low = totalQty <= item.minStock;
               const catIcon = CATS.find(cat=>cat.id===item.category)?.icon||'📦';
@@ -3840,8 +3859,8 @@ function Items(){
                 React.createElement('td',null,
                   React.createElement('div',{style:{fontWeight:800,fontSize:14,color:low?'var(--red)':totalQty>0?'var(--green)':'var(--txt3)'}},String(totalQty),' ',item.unit),
                   low&&React.createElement('div',{style:{fontSize:9,color:'var(--red)',fontWeight:600}},'⚠ LOW'),
-                  isSA&&whsWithStock&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:2}},
-                    String(whsWithStock.length)+' / '+String(itemSvc.getAllByCode(item.code||item.name).length)+' WHs'
+                  isSA&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:2}},
+                    String(item.warehousesWithStock||0)+' / '+String(item.warehouseCount||0)+' WHs'
                   )
                 ),
                 // Min (non-SA only)
@@ -3852,7 +3871,7 @@ function Items(){
                 React.createElement('td',null,React.createElement('span',{className:'sdot '+(item.status==='Active'?'active':'inactive')},item.status)),
                 // Actions
                 React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                  React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{initial:item,whIdCtx:item.whId,onClose:()=>setModal(null),onSave:async d=>{await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});toast('Updated','success');await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'edit',s:12})),
+                  React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{initial:item,whIdCtx:item.whId,onClose:()=>setModal(null),onSave:async d=>{await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});toast('Updated','success');await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'edit',s:12})),
                   React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Item',text:'Delete "'+item.name+'" from all warehouses?',onCancel:()=>setModal(null),onOk:async()=>{
                     // SA: delete from all warehouses
                     if(isSA){
@@ -3861,7 +3880,7 @@ function Items(){
                     } else {
                       await itemSvc.delete(item.id);
                     }
-                    toast('Deleted','success');await reload();setItems(isSA?itemSvc.getUnique():itemSvc.getAll(whF||null));setModal(null);
+                    toast('Deleted','success');await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));setModal(null);
                   }}))},React.createElement(Ic,{n:'trash',s:12}))
                 ))
               );
