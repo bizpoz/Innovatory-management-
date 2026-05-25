@@ -1703,7 +1703,7 @@ function Provider({children}){
   const [tick,setTick]=useState(0);
   const [drilldown,setDrilldown]=useState(null);
 
-  const [loading,setLoading]=useState(true);
+  const [loading,setLoading]=useState(false);
 
   useEffect(()=>{
     // Show app IMMEDIATELY — no waiting
@@ -1762,11 +1762,11 @@ function Provider({children}){
   const isSA=user?.role==='Super Admin';
   const whId=isSA?null:(user?.whId||null);
 
-  if(loading&&!user)return React.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#1a2744',gap:16}},
+  if(loading)return React.createElement('div',{style:{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#1a2744',gap:16}},
     React.createElement('img',{src:BIZPOZ_LOGO,alt:'BIZPOZ',style:{width:64,height:64,borderRadius:12,marginBottom:4}}),
     React.createElement('div',{style:{color:'#FFD700',fontWeight:900,fontSize:24,letterSpacing:'2px'}},'BIZPOZ'),
     React.createElement('div',{style:{display:'flex',gap:6,marginTop:8}},[0,1,2].map(i=>React.createElement('div',{key:i,style:{width:8,height:8,borderRadius:'50%',background:'rgba(255,255,255,.4)',animation:'pulse 1.2s ease-in-out '+(i*0.2)+'s infinite'}}))),
-    React.createElement('div',{style:{color:'rgba(255,255,255,.5)',fontSize:12,marginTop:8}},'Connecting to database...')
+    React.createElement('div',{style:{color:'rgba(255,255,255,.5)',fontSize:12,marginTop:8}},'Loading...')
   );
 
   return React.createElement(Ctx.Provider,{value:{user,setUser,page,nav,toasts,toast,modal,setModal,login,logout,sideOpen,setSideOpen,reload,tick,whId,isSA,drilldown,setDrilldown}},children);
