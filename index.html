@@ -1706,43 +1706,28 @@ function Provider({children}){
   const [loading,setLoading]=useState(true);
 
   useEffect(()=>{
+    // Show app IMMEDIATELY — no waiting
+    const s=userSvc.session();if(s)setUser(s);
+    setLoading(false);
+
+    // Load all data silently in background
     (async()=>{
       try {
-        // Phase 1: Restore session from localStorage instantly — show app right away
         await settSvc.getAsync();
-        const s=userSvc.session();if(s)setUser(s);
-
-        // Show app immediately with whatever is in localStorage cache
-        setLoading(false);
-
-        // Phase 2: Load all data in background — app already showing
-        const sessionUser = userSvc.session();
-        const isSuperAdmin = sessionUser?.role === 'Super Admin';
-        const userWhId = sessionUser?.whId || null;
-
-        // Small/fast data first — needed for navigation
         await Promise.all([
           whSvc.loadAll(), rackSvc.loadAll(), supplierSvc.loadAll(),
           userSvc.loadAll(), catSvc.loadAll(), whGroupSvc.loadAll(),
         ]);
-
-        // Items + stock — paginated, completely background, don't await
-        const loadItemsAndStock = isSuperAdmin
-          ? ()=>itemSvc.loadAll(null).then(()=>stockSvc.loadAll(null))
-          : ()=>itemSvc.loadAll(userWhId).then(()=>stockSvc.loadAll(userWhId));
-        loadItemsAndStock().catch(()=>{});
-
+        const sessionUser = userSvc.session();
+        const isSA2 = sessionUser?.role === 'Super Admin';
+        const userWhId = isSA2 ? null : (sessionUser?.whId || null);
+        // Items + stock — paginated background load
+        itemSvc.loadAll(userWhId).then(()=>stockSvc.loadAll(userWhId)).catch(()=>{});
         // Transactions — fire and forget
-        Promise.all([
-          grvSvc.loadAll(), givSvc.loadAll(), trnSvc.loadAll(),
-          conSvc.loadAll(), proSvc.loadAll(), mrSvc.loadAll(), dmgSvc.loadAll(),
-        ]).catch(e=>console.warn('Transaction load:', e.message));
-
+        [grvSvc,givSvc,trnSvc,conSvc,proSvc,mrSvc,dmgSvc]
+          .forEach(svc=>svc.loadAll(userWhId).catch(()=>{}));
       } catch(e) {
-        console.warn('Bootstrap error:', e.message);
-        seedDB();
-        const s=userSvc.session();if(s)setUser(s);
-        setLoading(false);
+        console.warn('Background load error:', e.message);
       }
     })();
   },[]);
@@ -1760,8 +1745,10 @@ function Provider({children}){
   const reload=useCallback(async()=>{
     try {
       const whId2=userSvc.session()?.role==='Super Admin'?null:userSvc.session()?.whId||null;
+      // Force refresh cache
+      itemSvc._cache=null; stockSvc._cache=null;
       await Promise.all([
-        (whId2?itemSvc.loadAll(whId2):itemSvc.loadUnique()), stockSvc.loadAll(whId2), catSvc.loadAll(),
+        itemSvc.loadAll(whId2), stockSvc.loadAll(whId2), catSvc.loadAll(),
         grvSvc.loadAll(whId2), givSvc.loadAll(whId2),
         trnSvc.loadAll(whId2), conSvc.loadAll(whId2),
         proSvc.loadAll(whId2), mrSvc.loadAll(whId2), dmgSvc.loadAll(whId2),
