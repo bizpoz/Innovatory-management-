@@ -387,7 +387,7 @@ const sbFetch = async (path, opts={}) => {
       'Authorization': `Bearer ${SB_ANON_KEY}`,
       'Prefer':        opts.prefer || 'return=representation',
       // Range header only on GET — never on POST/PATCH/DELETE
-      ...(isGet ? {'Range': '0-9999'} : {}),
+      ...(isGet ? {'Range': '0-99999'} : {}),
       // opts.headers last so callers can override (e.g. upsert Prefer)
       ...(opts.headers||{}),
     },
@@ -958,7 +958,7 @@ const itemSvc = {
         headers: {
           'apikey': SB_ANON_KEY,
           'Authorization': `Bearer ${SB_ANON_KEY}`,
-          'Range': '0-9999',
+          'Range': '0-99999',
           'Prefer': 'count=none',
         }
       });
@@ -1001,7 +1001,7 @@ const itemSvc = {
     try {
       const res = await fetch(
         `${SB_URL}/rest/v1/v_item_catalog?order=name.asc`,
-        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-99999', 'Prefer': 'count=none' } }
       );
       if (res.ok) {
         const rows = await res.json();
@@ -1040,7 +1040,7 @@ const itemSvc = {
       for (const wh of whs.slice(0, 3)) {
         const res = await fetch(
           `${SB_URL}/rest/v1/items?warehouse_id=eq.${wh.id}&order=name.asc`,
-          { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+          { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-99999', 'Prefer': 'count=none' } }
         );
         if (res.ok) {
           const rows = await res.json();
@@ -1083,7 +1083,7 @@ const itemSvc = {
     try {
       const res = await fetch(
         `${SB_URL}/rest/v1/items?code=eq.${encodeURIComponent(code)}`,
-        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-99999', 'Prefer': 'count=none' } }
       );
       if (res.ok) {
         const rows = await res.json();
@@ -1104,7 +1104,7 @@ const itemSvc = {
     try {
       const res = await fetch(
         `${SB_URL}/rest/v1/items?select=warehouse_id&order=warehouse_id`,
-        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-99999', 'Prefer': 'count=none' } }
       );
       if (res.ok) {
         const rows = await res.json();
@@ -1235,7 +1235,7 @@ const stockSvc = {
         headers: {
           'apikey': SB_ANON_KEY,
           'Authorization': `Bearer ${SB_ANON_KEY}`,
-          'Range': '0-9999',
+          'Range': '0-99999',
           'Prefer': 'count=none',
         }
       });
@@ -1309,7 +1309,7 @@ const stockSvc = {
       const filter = itemIds.map(id => `item_id=eq.${id}`).join(',');
       const res = await fetch(
         `${SB_URL}/rest/v1/stock?or=(${filter})`,
-        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
+        { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-99999', 'Prefer': 'count=none' } }
       );
       if (res.ok) {
         const rows = await res.json();
@@ -1706,12 +1706,22 @@ function Provider({children}){
   const [loading,setLoading]=useState(true);
 
   useEffect(()=>{
-    // Bootstrap: load all data from Supabase then restore session
     (async()=>{
       try {
-        // Load settings first (needed for prefixes)
+        // Phase 1: Restore session from localStorage instantly — show app right away
         await settSvc.getAsync();
-        // Load all master data in parallel
+        const s=userSvc.session();if(s)setUser(s);
+
+        // Show app immediately with whatever is in localStorage cache
+        setLoading(false);
+
+        // Phase 2: Silently refresh all data from Supabase in background
+        // User can navigate freely while this loads
+        const sessionUser = userSvc.session();
+        const isSuperAdmin = sessionUser?.role === 'Super Admin';
+        const userWhId = sessionUser?.whId || null;
+
+        // Load fast/small data first
         await Promise.all([
           whSvc.loadAll(),
           rackSvc.loadAll(),
@@ -1720,23 +1730,18 @@ function Provider({children}){
           catSvc.loadAll(),
           whGroupSvc.loadAll(),
         ]);
-        // SA: load WH counts + catalog (fast), not all 6300 rows
-        // Non-SA: load only their warehouse
-        const sessionUser = userSvc.session();
-        if (sessionUser?.role === 'Super Admin') {
-          await Promise.all([
-            itemSvc.loadWhCounts(),  // fast: just warehouse_id counts
-            itemSvc.loadUnique(),    // catalog: 105 rows with totals
-          ]);
+
+        // Load items + stock (big — but silently, app already showing)
+        if (isSuperAdmin) {
+          await itemSvc.loadAll(null);
+          await stockSvc.loadAll(null);
         } else {
-          const initWhId = sessionUser?.whId || null;
-          await Promise.all([
-            itemSvc.loadAll(initWhId),
-            stockSvc.loadAll(initWhId),
-          ]);
+          await itemSvc.loadAll(userWhId);
+          await stockSvc.loadAll(userWhId);
         }
-        // Load transaction data
-        await Promise.all([
+
+        // Load transactions silently last
+        Promise.all([
           grvSvc.loadAll(),
           givSvc.loadAll(),
           trnSvc.loadAll(),
@@ -1744,14 +1749,14 @@ function Provider({children}){
           proSvc.loadAll(),
           mrSvc.loadAll(),
           dmgSvc.loadAll(),
-        ]);
+        ]).catch(e=>console.warn('Transaction load:', e.message));
+
       } catch(e) {
-        console.warn('Supabase load failed, using local data:', e.message);
-        // Fallback: seed localStorage if empty
+        console.warn('Bootstrap error:', e.message);
         seedDB();
+        const s=userSvc.session();if(s)setUser(s);
+        setLoading(false);
       }
-      const s=userSvc.session();if(s)setUser(s);
-      setLoading(false);
     })();
   },[]);
   useEffect(()=>{
@@ -3707,16 +3712,19 @@ function Items(){
     setItems(itemSvc.getAll(isSA?(whF||null):(whId||null)));
   };
 
-  // Load all items for SA on mount
+  // Silently refresh items in background when page opens
   React.useEffect(()=>{
-    if(!isSA)return;
     (async()=>{
-      if(!itemSvc.getAll(null).length){
+      if(isSA){
         await itemSvc.loadAll(null);
         await stockSvc.loadAll(null);
-        setItems(itemSvc.getAll(whF||null));
+      } else {
+        await itemSvc.loadAll(whId);
+        await stockSvc.loadAll(whId);
       }
-    })();
+      // Update display after silent load
+      setItems(itemSvc.getAll(isSA?(whF||null):(whId||null)));
+    })().catch(e=>console.warn('Items refresh:',e.message));
   },[]);
 
   const filtered=useMemo(()=>items.filter(i=>{
