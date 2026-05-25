@@ -1030,13 +1030,14 @@ const itemSvc = {
       return await this._loadUniqueFallback();
     }
   },
-  // Fallback: load unique items from first warehouse when view doesn't exist
+  // Fallback: deduplicate from cache when view doesn't exist
   async _loadUniqueFallback() {
     try {
+      // First try to get items from any warehouse
       const whs = whSvc.getAll();
       if (!whs.length) return [];
-      // Try each warehouse until we find one with items
-      for (const wh of whs.slice(0, 5)) {
+      // Load from first warehouse with items
+      for (const wh of whs.slice(0, 3)) {
         const res = await fetch(
           `${SB_URL}/rest/v1/items?warehouse_id=eq.${wh.id}&order=name.asc`,
           { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}`, 'Range': '0-9999', 'Prefer': 'count=none' } }
@@ -1044,10 +1045,15 @@ const itemSvc = {
         if (res.ok) {
           const rows = await res.json();
           if (Array.isArray(rows) && rows.length > 0) {
-            // Map as catalog rows but with 0 totals (will be updated by phase 2)
-            this._catalogCache = rows.map(r => ({
-              ...mapItem(r),
-              totalStock: stockSvc.getQty(r.id, r.warehouse_id)||0,
+            const mapped = rows.map(r => mapItem(r));
+            // Merge into main cache
+            const existing = this._cache ? this._cache.filter(i => i.whId !== wh.id) : [];
+            this._cache = [...existing, ...mapped];
+            db.s('items', this._cache);
+            // Build catalog from these rows
+            this._catalogCache = mapped.map(item => ({
+              ...item,
+              totalStock: 0, // will be updated in phase 2
               warehouseCount: whs.length,
               warehousesWithStock: 0,
               _isCatalog: true,
@@ -1058,9 +1064,17 @@ const itemSvc = {
         }
       }
     } catch(e) { console.warn('_loadUniqueFallback:', e.message); }
-    // Last resort: use local cache
-    const cached = localStorage.getItem('gs_catalog');
-    if (cached) { try { this._catalogCache = JSON.parse(cached); return this._catalogCache; } catch(e){} }
+    // Last resort: deduplicate whatever is in cache
+    const all = this.getAll();
+    if (all.length) {
+      const seen = new Map();
+      for (const item of all) {
+        const key = item.code||item.name;
+        if (!seen.has(key)) seen.set(key, {...item, totalStock:0, warehouseCount:0, warehousesWithStock:0, _isCatalog:true});
+      }
+      this._catalogCache = Array.from(seen.values());
+      return this._catalogCache;
+    }
     return [];
   },
   // Load all warehouse copies of a specific item by code (for detail view)
@@ -3678,84 +3692,64 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
 function Items(){
   const {toast,setModal,whId,isSA,reload}=useCtx();
   const whs=whSvc.getAll();
-  // SA sees unique catalog (one row per item), non-SA sees their WH items
-  const [items,setItems]=useState(isSA ? itemSvc.getCatalog() : itemSvc.getAll(whId));
+  const [items,setItems]=useState(()=>itemSvc.getAll(isSA?null:whId));
   const [q,setQ]=useState('');
   const [catF,setCatF]=useState('');
-  const [whF,setWhF]=useState(whId||'');
+  const [whF,setWhF]=useState(isSA?'':whId||'');
   const [assetF,setAssetF]=useState('');
   const [detail,setDetail]=useState(null);
-  // Phase 2: background loading state
-  const [phase2,setPhase2]=useState(!isSA); // non-SA starts ready
-  const [phase2Loading,setPhase2Loading]=useState(false);
-  const [catalogMode,setCatalogMode]=useState(isSA); // SA starts in catalog mode
-
   const racks=rackSvc.getAll(whF||null);
   const sym=settSvc.get().currencySymbol||'QR';
 
-  // On mount: load catalog if empty, then kick off phase 2 in background
+  const reloadItems=async()=>{
+    if(isSA){await itemSvc.loadAll(null);await stockSvc.loadAll(null);}
+    else{await itemSvc.loadAll(whId);await stockSvc.loadAll(whId);}
+    setItems(itemSvc.getAll(isSA?(whF||null):(whId||null)));
+  };
+
+  // Load all items for SA on mount
   React.useEffect(()=>{
     if(!isSA)return;
     (async()=>{
-      // Phase 1: ensure catalog is loaded
-      if(!itemSvc.getCatalog().length){
-        const catalog = await itemSvc.loadUnique();
-        if(catalog.length) setItems(catalog);
-      }
-      // Phase 2: background load of all warehouse data
-      if(!phase2){
-        setPhase2Loading(true);
-        try{
-          await itemSvc.loadAll(null);
-          await stockSvc.loadAll(null);
-          setPhase2(true);
-          // Update catalog totals from real stock data
-          await itemSvc.loadUnique();
-          if(catalogMode) setItems(itemSvc.getCatalog());
-        }catch(e){ console.warn('Phase2 load:',e); }
-        finally{ setPhase2Loading(false); }
+      if(!itemSvc.getAll(null).length){
+        await itemSvc.loadAll(null);
+        await stockSvc.loadAll(null);
+        setItems(itemSvc.getAll(whF||null));
       }
     })();
   },[]);
-
-  const reloadItems=async()=>{await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));};
 
   const filtered=useMemo(()=>items.filter(i=>{
     const mq=i.name.toLowerCase().includes(q.toLowerCase())||
               (i.code||'').toLowerCase().includes(q.toLowerCase())||
               (i.assetCode||'').toLowerCase().includes(q.toLowerCase());
     const mc=!catF||i.category===catF;
-    // In catalog mode SA sees all unique items; in WH mode filter by selected WH
-    const mw=!isSA||catalogMode?true:(!whF||i.whId===whF);
+    const mw=!whF||i.whId===whF;
     const ma=!assetF||(assetF==='asset'?!!i.isAsset:!i.isAsset);
     return mq&&mc&&mw&&ma;
-  }),[items,q,catF,whF,assetF,catalogMode]);
+  }),[items,q,catF,whF,assetF]);
 
-  // Export to CSV
   const exportCSV=(rows)=>{
-    const header='Code,Name,Category,Warehouse,Rack,Unit,Stock,Min Stock,Cost Price,Is Asset,Asset Code,Description';
-    const body=rows.map(i=>{
-      const rack=rackSvc.getAll(null).find(r=>r.id===i.rackId);
-      const wh=whSvc.getById(i.whId);
-      const qty=stockSvc.getQty(i.id,i.whId);
-      return [i.code,'"'+i.name+'"',CATS.find(c=>c.id===i.category)?.short||'',wh?.name||'',rack?.code||'',i.unit,qty,i.minStock,i.costPrice,i.isAsset?'YES':'NO',i.assetCode||'','"'+(i.description||'')+'"'].join(',');
-    });
-    const blob=new Blob([[header,...body].join('\r\n')],{type:'text/csv'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='items-export.csv';a.click();
-    toast('Exported '+rows.length+' items','success');
+    const hdr='Code,Name,Category,Unit,Stock,Min Stock,Cost Price,Is Asset,Asset Code,Status';
+    const csv=[hdr,...rows.map(i=>[i.code,i.name,i.category,i.unit,
+      stockSvc.getQty(i.id,i.whId),i.minStock,i.costPrice,
+      i.isAsset?'YES':'NO',i.assetCode||'',i.status].join(','))].join('\n');
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download='items.csv';a.click();
   };
 
-  // Bulk Upload dialog
-  const bulkUploadDialog=()=>{
-    setModal(React.createElement(BulkUploadModal,{whId:whF||whId||whs[0]?.id,onDone:(count)=>{toast(count+' items imported successfully','success');reloadItems();setModal(null);},onClose:()=>setModal(null)}));
-  };
-
-  // Print Asset Labels
   const printAssetLabels=(assets)=>{
     if(!assets.length){toast('No assets to print. Filter by Assets first.','warning');return;}
     setModal(React.createElement(AssetLabelPrinter,{assets,onClose:()=>setModal(null)}));
   };
 
+  const bulkUploadDialog=()=>setModal(React.createElement(BulkUploadModal,{
+    whId:whF||whId||whs[0]?.id,
+    onClose:()=>setModal(null),
+    onDone:async(count)=>{toast(String(count)+' items imported','success');setModal(null);await reloadItems();}
+  }));
+
+  // ── DETAIL VIEW ──
   // ── DETAIL VIEW ──
   if(detail){
     const item=detail;
@@ -3916,168 +3910,124 @@ function Items(){
     React.createElement('div',{className:'ph'},
       React.createElement('div',{className:'ph-l'},
         React.createElement('h1',null,'Item Master'),
-        React.createElement('p',null,
-          String(filtered.length)+(catalogMode?' unique items — total stock across all warehouses':' items'+(isSA?' in '+(whSvc.getById(whF)?.name||'all warehouses'):' in '+(whSvc.getById(whId)?.name||''))),
-          isSA&&phase2Loading&&React.createElement('span',{style:{marginLeft:8,fontSize:11,color:'var(--blue)',fontWeight:600}},
-            '⏳ Loading per-warehouse data...'
-          ),
-          isSA&&phase2&&!phase2Loading&&React.createElement('span',{style:{marginLeft:8,fontSize:11,color:'var(--green)',fontWeight:600}},
-            '✓ Full data loaded'
-          )
-        )
+        React.createElement('p',null,String(filtered.length)+' items'+(isSA?' across all warehouses':' in '+(whSvc.getById(whId)?.name||'')))
       ),
       React.createElement('div',{className:'ph-r'},
-        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{whIdCtx:whF||whId||whs[0]?.id,onClose:()=>setModal(null),onSave:async d=>{const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');await reload();setItems(itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item'),
+        React.createElement('button',{className:'btn btn-primary',onClick:()=>setModal(React.createElement(ItemForm,{
+          whIdCtx:whF||whId||whs[0]?.id,
+          onClose:()=>setModal(null),
+          onSave:async d=>{
+            const item=await itemSvc.create({...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock),whId:d.whId||whF||whId||whs[0]?.id});
+            toast('Item created'+(Number(d.openingQty)>0?' with '+d.openingQty+' '+item.unit+' opening stock':''),'success');
+            await reloadItems();setModal(null);
+          }
+        }))},React.createElement(Ic,{n:'plus',s:13,c:'#fff'}),' Add Item'),
         isSA&&React.createElement('button',{
-          className:'btn btn-danger btn-sm',
-          style:{marginLeft:8},
+          className:'btn btn-danger btn-sm',style:{marginLeft:8},
           onClick:()=>setModal(React.createElement(ClearItemsModal,{
             onClose:()=>setModal(null),
-            onDone:async()=>{await reload();setItems(itemSvc.getAll(whF||null));setModal(null);toast('All items deleted','success');}
+            onDone:async()=>{await reloadItems();setModal(null);toast('All items deleted','success');}
           }))
         },React.createElement(Ic,{n:'trash',s:13,c:'#fff'}),' Clear All Items')
       )
     ),
     React.createElement('div',{className:'sb-bar'},
-      React.createElement('div',{className:'si'},React.createElement('div',{className:'si-ico'},React.createElement(Ic,{n:'search',s:13,c:'var(--txt3)'})),React.createElement('input',{placeholder:'Search name / code...',value:q,onChange:e=>setQ(e.target.value)})),
-      React.createElement('select',{className:'fs',value:catF,onChange:e=>setCatF(e.target.value)},React.createElement('option',{value:''},'All Categories'),CATS.map(c=>React.createElement('option',{key:c.id,value:c.id},c.name))),
-      React.createElement('select',{className:'fs',value:assetF,onChange:ev=>setAssetF(ev.target.value)},React.createElement('option',{value:''},'All Items'),React.createElement('option',{value:'asset'},'🏷 Assets Only'),React.createElement('option',{value:'non-asset'},'📦 Non-Assets')),
-      // SA: mode toggle + warehouse filter (available after phase 2 loads)
-      isSA&&React.createElement('div',{style:{display:'flex',gap:6,alignItems:'center'}},
-        React.createElement('div',{style:{display:'flex',border:'1px solid var(--border2)',borderRadius:'var(--r)',overflow:'hidden'}},
-          React.createElement('button',{
-            style:{padding:'5px 10px',fontSize:11,fontWeight:600,border:'none',cursor:'pointer',
-              background:catalogMode?'var(--primary)':'var(--bg)',
-              color:catalogMode?'#fff':'var(--txt2)'},
-            onClick:()=>{setCatalogMode(true);setWhF('');setItems(itemSvc.getCatalog());}
-          },'📦 Catalog'),
-          React.createElement('button',{
-            style:{padding:'5px 10px',fontSize:11,fontWeight:600,border:'none',cursor:'pointer',
-              background:!catalogMode?'var(--primary)':'var(--bg)',
-              color:!catalogMode?'#fff':'var(--txt2)',
-              opacity:phase2?1:0.5},
-            title:phase2?'':'Loading per-warehouse data...',
-            onClick:async()=>{
-              if(!phase2){
-                // Trigger phase 2 load if not done yet
-                setPhase2Loading(true);
-                await itemSvc.loadAll(null);
-                await stockSvc.loadAll(null);
-                setPhase2(true);
-                setPhase2Loading(false);
-              }
-              setCatalogMode(false);
-              setItems(itemSvc.getAll(whF||null));
-            }
-          },phase2Loading?'⏳ Loading...':'🏭 By Warehouse')
-        ),
-        !catalogMode&&phase2&&React.createElement('select',{
-          className:'fs',value:whF,
-          onChange:async e=>{
-            const newWh=e.target.value;
-            setWhF(newWh);
-            setItems(itemSvc.getAll(newWh||null));
-          }
-        },
-          React.createElement('option',{value:''},'All Warehouses'),
-          whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name+' ('+w.code+')'))
-        )
-      )),
+      React.createElement('div',{className:'si'},
+        React.createElement('div',{className:'si-ico'},React.createElement(Ic,{n:'search',s:13,c:'var(--txt3)'})),
+        React.createElement('input',{placeholder:'Search name / code...',value:q,onChange:e=>setQ(e.target.value)})
+      ),
+      React.createElement('select',{className:'fs',value:catF,onChange:e=>setCatF(e.target.value)},
+        React.createElement('option',{value:''},'All Categories'),
+        CATS.map(c=>React.createElement('option',{key:c.id,value:c.id},c.name))
+      ),
+      React.createElement('select',{className:'fs',value:assetF,onChange:e=>setAssetF(e.target.value)},
+        React.createElement('option',{value:''},'All Items'),
+        React.createElement('option',{value:'asset'},'🏷 Assets Only'),
+        React.createElement('option',{value:'non-asset'},'📦 Non-Assets')
+      ),
+      isSA&&React.createElement('select',{className:'fs',value:whF,onChange:async e=>{
+        const v=e.target.value;setWhF(v);
+        if(v&&!itemSvc.getAll(v).length){await itemSvc.loadAll(v);await stockSvc.loadAll(v);}
+        setItems(itemSvc.getAll(v||null));
+      }},
+        React.createElement('option',{value:''},'All Warehouses'),
+        whs.map(w=>React.createElement('option',{key:w.id,value:w.id},w.name+' ('+w.code+')'))
+      )
     ),
     React.createElement('div',{style:{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}},
-      React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>printAssetLabels(filtered.filter(i=>i.isAsset)),title:'Print asset labels for filtered assets'},'🏷 Print Asset Labels ('+String(filtered.filter(i=>i.isAsset).length)+')'),
-      React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>bulkUploadDialog()},'  Bulk Upload'),
+      React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>printAssetLabels(filtered.filter(i=>i.isAsset))},'🏷 Print Asset Labels ('+String(filtered.filter(i=>i.isAsset).length)+')'),
+      React.createElement('button',{className:'btn btn-outline btn-sm',onClick:bulkUploadDialog},'  Bulk Upload'),
       React.createElement('button',{className:'btn btn-outline btn-sm',onClick:()=>exportCSV(filtered)},'📥 Export CSV')
     ),
     React.createElement('div',{className:'tw'},
       React.createElement('table',null,
         React.createElement('thead',null,React.createElement('tr',null,
-          (isSA && catalogMode
-            ? ['Photo','Item Name','Category','Unit','Total Stock','In Stock WHs','Rate','Status','']
-            : ['Photo','Item Name','Category',isSA?'Warehouse':'Rack','Unit','Stock','Min','Rate','Status','']
-          ).map(h=>React.createElement('th',{key:h},h))
+          ['Photo','Item Name','Category',isSA&&'Warehouse','Rack','Unit','Stock','Min','Rate','Status',''].filter(Boolean).map(h=>React.createElement('th',{key:h},h))
         )),
         React.createElement('tbody',null,
           filtered.length===0
-            ? React.createElement('tr',null,React.createElement('td',{colSpan:9},React.createElement('div',{className:'te'},'No items found')))
+            ? React.createElement('tr',null,React.createElement('td',{colSpan:10},React.createElement('div',{className:'te'},'No items found')))
             : filtered.map(item=>{
-              const isCatalogRow = isSA && catalogMode;
-              const totalQty = isCatalogRow ? (item.totalStock||0) : stockSvc.getQty(item.id,item.whId);
-              const rack = !isCatalogRow&&!isSA ? racks.find(r=>r.id===item.rackId) : null;
-              const wh = isSA&&!catalogMode ? whSvc.getById(item.whId) : null;
-              const low = totalQty <= item.minStock;
-              const catIcon = CATS.find(cat=>cat.id===item.category)?.icon||'📦';
-              return React.createElement('tr',{key:item.id,style:{cursor:'pointer'},
-                onClick:async()=>{
-                // For SA catalog items: lazy-load all warehouse copies of just this item
-                if(isSA && item._isCatalog) {
-                  await itemSvc.loadByCode(item.code);
-                  await stockSvc.loadByCode(item.code);
-                }
-                setDetail(item);
-              }},
-                // Photo
+              const rack=racks.find(r=>r.id===item.rackId);
+              const qty=stockSvc.getQty(item.id,item.whId);
+              const low=qty<=item.minStock;
+              const catIcon=CATS.find(cat=>cat.id===item.category)?.icon||'📦';
+              return React.createElement('tr',{key:item.id,style:{cursor:'pointer'},onClick:()=>setDetail(item)},
                 React.createElement('td',null,
                   item.photo
-                    ? React.createElement('img',{src:item.photo,className:'item-photo',alt:item.name,style:{width:36,height:36,borderRadius:6,objectFit:'cover',border:'1px solid var(--border)'}})
+                    ? React.createElement('img',{src:item.photo,alt:item.name,style:{width:36,height:36,borderRadius:6,objectFit:'cover'}})
                     : React.createElement('div',{style:{width:36,height:36,borderRadius:6,background:'var(--off2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}},catIcon)
                 ),
-                // Name
                 React.createElement('td',null,
                   React.createElement('div',{style:{fontWeight:600}},item.name),
-                  item.isAsset&&React.createElement('div',{style:{fontSize:10,color:'#c2410c',fontWeight:600,marginTop:2}},'🏷 ',item.assetCode||'Asset'),
-                  item.code&&React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:'var(--txt3)',marginTop:1}},item.code)
+                  item.isAsset&&React.createElement('div',{style:{fontSize:10,color:'#c2410c',fontWeight:600}},'🏷 ',item.assetCode||'Asset'),
+                  item.code&&React.createElement('div',{style:{fontSize:10,fontFamily:'var(--mono)',color:'var(--txt3)'}},item.code)
                 ),
-                // Category
                 React.createElement('td',null,
                   React.createElement(CatBadge,{catId:item.category}),
                   item.subCategory&&React.createElement('div',{style:{marginTop:3}},React.createElement(CatBadge,{catId:item.subCategory}))
                 ),
-                // Warehouse col (SA warehouse mode) or Rack col (non-SA)
-                !isCatalogRow&&React.createElement('td',null,
-                  isSA
-                    ? React.createElement(WhBadge,{whId:item.whId})
-                    : (rack?React.createElement('span',{style:{color:'var(--blue)',fontFamily:'var(--mono)',fontSize:11}},rack.code):'-')
-                ),
-                // Unit
+                isSA&&React.createElement('td',null,React.createElement(WhBadge,{whId:item.whId})),
+                React.createElement('td',null,rack?React.createElement('span',{style:{color:'var(--blue)',fontFamily:'var(--mono)',fontSize:11}},rack.code):'-'),
                 React.createElement('td',null,item.unit),
-                // Stock
                 React.createElement('td',null,
-                  React.createElement('div',{style:{fontWeight:800,fontSize:14,color:low?'var(--red)':totalQty>0?'var(--green)':'var(--txt3)'}},String(totalQty),' ',item.unit),
-                  low&&React.createElement('div',{style:{fontSize:9,color:'var(--red)',fontWeight:600}},'⚠ LOW'),
-                  isCatalogRow&&React.createElement('div',{style:{fontSize:10,color:'var(--txt3)',marginTop:2}},
-                    String(item.warehousesWithStock||0)+' / '+String(item.warehouseCount||0)+' WHs'
-                  )
+                  React.createElement('div',{style:{fontWeight:800,fontSize:14,color:low?'var(--red)':qty>0?'var(--green)':'var(--txt3)'}},String(qty),' ',item.unit),
+                  low&&React.createElement('div',{style:{fontSize:9,color:'var(--red)',fontWeight:600}},'⚠ LOW')
                 ),
-                // Min stock (non-catalog mode only)
-                !isCatalogRow&&React.createElement('td',null,String(item.minStock)),
-                // Rate
+                React.createElement('td',null,String(item.minStock)),
                 React.createElement('td',null,sym+' '+fmt(item.costPrice)),
-                // Status
                 React.createElement('td',null,React.createElement('span',{className:'sdot '+(item.status==='Active'?'active':'inactive')},item.status)),
-                // Actions
-                React.createElement('td',{onClick:e=>e.stopPropagation()},React.createElement('div',{style:{display:'flex',gap:4}},
-                  React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{initial:item,whIdCtx:item.whId,onClose:()=>setModal(null),onSave:async d=>{await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});toast('Updated','success');await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));setModal(null);}}))},React.createElement(Ic,{n:'edit',s:12})),
-                  React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{title:'Delete Item',text:'Delete "'+item.name+'" from all warehouses?',onCancel:()=>setModal(null),onOk:async()=>{
-                    // SA: delete from all warehouses
-                    if(isSA){
-                      const copies=itemSvc.getAllByCode(item.code||item.name);
-                      for(const copy of copies) await itemSvc.delete(copy.id);
-                    } else {
-                      await itemSvc.delete(item.id);
-                    }
-                    toast('Deleted','success');await reload();setItems(isSA?itemSvc.getCatalog():itemSvc.getAll(whF||null));setModal(null);
-                  }}))},React.createElement(Ic,{n:'trash',s:12}))
-                ))
+                React.createElement('td',{onClick:e=>e.stopPropagation()},
+                  React.createElement('div',{style:{display:'flex',gap:4}},
+                    React.createElement('button',{className:'btn btn-outline btn-sm btn-icon',onClick:()=>setModal(React.createElement(ItemForm,{
+                      initial:item,whIdCtx:item.whId,
+                      onClose:()=>setModal(null),
+                      onSave:async d=>{
+                        await itemSvc.update(item.id,{...d,costPrice:Number(d.costPrice),minStock:Number(d.minStock)});
+                        toast('Updated','success');await reloadItems();setModal(null);
+                      }
+                    }))},React.createElement(Ic,{n:'edit',s:12})),
+                    React.createElement('button',{className:'btn btn-danger btn-sm btn-icon',onClick:()=>setModal(React.createElement(Confirm,{
+                      title:'Delete Item',
+                      text:'Delete "'+item.name+'" from all warehouses?',
+                      onCancel:()=>setModal(null),
+                      onOk:async()=>{
+                        if(isSA){const copies=itemSvc.getAllByCode(item.code||item.name);for(const copy of copies)await itemSvc.delete(copy.id);}
+                        else await itemSvc.delete(item.id);
+                        toast('Deleted','success');await reloadItems();setModal(null);
+                      }
+                    }))},React.createElement(Ic,{n:'trash',s:12}))
+                  )
+                )
               );
             })
         )
-      ),
+      )
+    ),
     React.createElement('div',{style:{marginTop:8,fontSize:11,color:'var(--txt3)',textAlign:'center'}},'💡 Click any row to view full item detail & transaction history')
   );
 }
 
-// ════════════════════════════════════════
 //  RACK MANAGEMENT — with click-to-detail
 // ════════════════════════════════════════
 function Racks(){
