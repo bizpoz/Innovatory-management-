@@ -1729,6 +1729,7 @@ function Provider({children}){
           await Promise.all([
             whSvc.loadAll(), rackSvc.loadAll(), supplierSvc.loadAll(),
             userSvc.loadAll(), catSvc.loadAll(), whGroupSvc.loadAll(),
+            itemSvc.loadWhCounts(),
           ]);
           const sess = userSvc.session();
           const whId2 = sess?.role==='Super Admin'
@@ -2565,6 +2566,11 @@ function Warehouses(){
   const [whs,setWhs]=useState(whSvc.getAll());
   const [groups,setGroups]=useState(whGroupSvc.getAll());
   const [viewTab,setViewTab]=useState('groups'); // 'groups' | 'all'
+
+  // Load accurate item counts for all warehouses
+  React.useEffect(()=>{
+    itemSvc.loadWhCounts().catch(()=>{});
+  },[]);
 
   const reloadAll=()=>{setWhs(whSvc.getAll());setGroups(whGroupSvc.getAll());reload();};
 
