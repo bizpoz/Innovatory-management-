@@ -1731,8 +1731,10 @@ function Provider({children}){
             userSvc.loadAll(), catSvc.loadAll(), whGroupSvc.loadAll(),
           ]);
           const sess = userSvc.session();
-          const whId2 = sess?.role==='Super Admin' ? null : (sess?.whId||null);
-          // Items load silently — don't await, let it run in background
+          const whId2 = sess?.role==='Super Admin'
+            ? (whSvc.getAll()[0]?.id || null)  // SA: first WH only = 105 items
+            : (sess?.whId||null);               // Store user: their WH
+          // Items load silently — don't await
           itemSvc.loadAll(whId2).then(()=>stockSvc.loadAll(whId2)).catch(()=>{});
           // Transactions — completely background
           [grvSvc,givSvc,trnSvc,conSvc,proSvc,mrSvc,dmgSvc]
@@ -3681,25 +3683,26 @@ function ItemForm({initial,onSave,onClose,whIdCtx}){
 function Items(){
   const {toast,setModal,whId,isSA,reload}=useCtx();
   const whs=whSvc.getAll();
-  const [items,setItems]=useState(()=>itemSvc.getAll(isSA?null:whId));
+  // SA defaults to first warehouse (fast - 105 items), not all warehouses (slow - 6300)
+  const defaultWhF = isSA ? (whs[0]?.id||'') : (whId||'');
+  const [items,setItems]=useState(()=>itemSvc.getAll(isSA?defaultWhF:whId));
   const [q,setQ]=useState('');
   const [catF,setCatF]=useState('');
-  const [whF,setWhF]=useState(isSA?'':whId||'');
+  const [whF,setWhF]=useState(defaultWhF);
   const [assetF,setAssetF]=useState('');
   const [detail,setDetail]=useState(null);
   const racks=rackSvc.getAll(whF||null);
   const sym=settSvc.get().currencySymbol||'QR';
 
   const reloadItems=async(force=false)=>{
-    if(force){
-      // Force refresh: clear cache first
-      itemSvc._cache=null; stockSvc._cache=null;
-    }
-    if(isSA){await itemSvc.loadAll(null);await stockSvc.loadAll(null);}
-    else{await itemSvc.loadAll(whId);await stockSvc.loadAll(whId);}
-    setItems(itemSvc.getAll(isSA?(whF||null):(whId||null)));
+    if(force){ itemSvc._cache=null; stockSvc._cache=null; }
+    const loadWh = isSA ? (whF||defaultWhF||null) : (whId||null);
+    await itemSvc.loadAll(loadWh);
+    await stockSvc.loadAll(loadWh);
+    setItems(itemSvc.getAll(loadWh));
   };
 
+  // Load items for default warehouse silently on mount
   // Items load silently via bootstrap — no blocking fetch here
 
   const filtered=useMemo(()=>items.filter(i=>{
