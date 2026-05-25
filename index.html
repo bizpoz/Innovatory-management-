@@ -412,10 +412,21 @@ const sbQ = (params={}) => {
 
 // ── localStorage db (fallback / local mode) ──
 const db={
-  g:(k)=>{try{return JSON.parse(localStorage.getItem(DB+k)||'null')}catch{return null}},
-  s:(k,v)=>localStorage.setItem(DB+k,JSON.stringify(v)),
+  g:(k)=>{
+    // Never load large datasets from localStorage - they block the main thread
+    if(k==='items'||k==='stock') return null;
+    try{return JSON.parse(localStorage.getItem(DB+k)||'null')}catch{return null}
+  },
+  s:(k,v)=>{
+    // Never save large datasets to localStorage
+    if(k==='items'||k==='stock') return;
+    try{localStorage.setItem(DB+k,JSON.stringify(v))}catch{}
+  },
   d:(k)=>localStorage.removeItem(DB+k),
 };
+
+// Clear old bloated items/stock from localStorage (one-time cleanup)
+try{localStorage.removeItem(DB+'items');localStorage.removeItem(DB+'stock');}catch{}
 
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 // Global submit guard — prevents duplicate item creation from rapid clicks
@@ -1706,30 +1717,29 @@ function Provider({children}){
   const [loading,setLoading]=useState(false);
 
   useEffect(()=>{
-    // Show app IMMEDIATELY — no waiting
-    const s=userSvc.session();if(s)setUser(s);
-    setLoading(false);
+    // Restore session instantly — synchronous only
+    const s=userSvc.session();
+    if(s) setUser(s);
 
-    // Load all data silently in background
-    (async()=>{
-      try {
-        await settSvc.getAsync();
-        await Promise.all([
-          whSvc.loadAll(), rackSvc.loadAll(), supplierSvc.loadAll(),
-          userSvc.loadAll(), catSvc.loadAll(), whGroupSvc.loadAll(),
-        ]);
-        const sessionUser = userSvc.session();
-        const isSA2 = sessionUser?.role === 'Super Admin';
-        const userWhId = isSA2 ? null : (sessionUser?.whId || null);
-        // Items + stock — paginated background load
-        itemSvc.loadAll(userWhId).then(()=>stockSvc.loadAll(userWhId)).catch(()=>{});
-        // Transactions — fire and forget
-        [grvSvc,givSvc,trnSvc,conSvc,proSvc,mrSvc,dmgSvc]
-          .forEach(svc=>svc.loadAll(userWhId).catch(()=>{}));
-      } catch(e) {
-        console.warn('Background load error:', e.message);
-      }
-    })();
+    // Defer ALL Supabase loading — don't block the UI thread at all
+    setTimeout(()=>{
+      (async()=>{
+        try {
+          await settSvc.getAsync();
+          await Promise.all([
+            whSvc.loadAll(), rackSvc.loadAll(), supplierSvc.loadAll(),
+            userSvc.loadAll(), catSvc.loadAll(), whGroupSvc.loadAll(),
+          ]);
+          const sess = userSvc.session();
+          const whId2 = sess?.role==='Super Admin' ? null : (sess?.whId||null);
+          // Items load silently — don't await, let it run in background
+          itemSvc.loadAll(whId2).then(()=>stockSvc.loadAll(whId2)).catch(()=>{});
+          // Transactions — completely background
+          [grvSvc,givSvc,trnSvc,conSvc,proSvc,mrSvc,dmgSvc]
+            .forEach(svc=>svc.loadAll(whId2).catch(()=>{}));
+        } catch(e){ console.warn('Background load:', e.message); }
+      })();
+    }, 100); // 100ms delay — page renders fully before any network calls
   },[]);
   useEffect(()=>{
     const dim=document.getElementById('dim');if(!dim)return;
