@@ -989,12 +989,12 @@ const itemSvc = {
       }
     } catch(e) {
       console.warn('itemSvc.loadAll:', e.message);
-      if (!this._cache) this._cache = db.g('items') || SEED.items;
+      if (!this._cache) this._cache = db.g('items') || [];
     }
     return this._cache || [];
   },
   getAll(whId) {
-    const all = this._cache || db.g('items') || SEED.items;
+    const all = this._cache || db.g('items') || [];
     return whId ? all.filter(i => i.whId === whId) : all;
   },
   getById(id) { return this.getAll().find(i => i.id === id); },
@@ -1265,12 +1265,12 @@ const stockSvc = {
       }
     } catch(e) {
       console.warn('stockSvc.loadAll:', e.message);
-      if (!this._cache) this._cache = db.g('stock') || SEED.stock;
+      if (!this._cache) this._cache = db.g('stock') || [];
     }
     return this._cache || [];
   },
   getAll(whId) {
-    const all = this._cache || db.g('stock') || SEED.stock;
+    const all = this._cache || db.g('stock') || [];
     return whId ? all.filter(s => s.whId === whId) : all;
   },
   // Get total qty across ALL warehouses for an item code
@@ -2044,10 +2044,18 @@ function Dashboard(){
   const whRef=useRef(null);
   const catInst=useRef(null);
   const whInst=useRef(null);
+  const [,forceUpdate]=useState(0);
 
   const sett=settSvc.get();
   const sym=String(sett.currencySymbol||'QR');
   const whs=whSvc.getAll();
+
+  // Load WH counts on mount so Total Items shows correct value
+  React.useEffect(()=>{
+    if(!itemSvc._whCounts){
+      itemSvc.loadWhCounts().then(()=>forceUpdate(n=>n+1)).catch(()=>{});
+    }
+  },[]);
 
   // Compute data for dashboard (always, even if drilldown active)
   const items=itemSvc.getAll(whId);
