@@ -2069,7 +2069,7 @@ function Dashboard(){
   const whStats=whs.map((w,idx)=>({
     id:String(w.id),name:String(w.name),code:String(w.code||''),
     status:String(w.status||''),
-    count:itemSvc.getAll(w.id).length,
+    count:itemSvc.getCountForWH(w.id),
     val:stockSvc.totalValue(w.id),
     low:stockSvc.getLow(w.id).length,
     color:['#2563eb','#16a34a','#d97706','#7c3aed','#0891b2'][idx%5],
@@ -2139,7 +2139,7 @@ function Dashboard(){
   if(drilldown)return React.createElement(DrillDown,{drilldown,onBack:()=>setDrilldown(null)});
 
   const kpiRow=[
-    {l:'Total Items',    v:String(items.length),       s:'Click to view items',    ico:'📦',c:'var(--blue)',   fn:()=>nav('items')},
+    {l:'Total Items',    v:String(isSA ? (()=>{const counts=Object.values(itemSvc._whCounts||{});return counts.length?Math.max(...counts):items.length;})() : items.length),       s:'Click to view items',    ico:'📦',c:'var(--blue)',   fn:()=>nav('items')},
     {l:'Stock Value',    v:sym+' '+fmt(totalVal,0),     s:'Click to view stock',    ico:'💰',c:'var(--green)',  fn:()=>nav('stockview')},
     {l:'Low Stock',      v:String(low.length),          s:'Click to see details',   ico:'⚠️',c:low.length?'var(--red)':'var(--green)',fn:()=>setDrilldown({type:'lowstock'})},
     {l:'Pending',        v:String(pendingApprovals),    s:'Click for approvals',    ico:'⏳',c:pendingApprovals?'var(--amber)':'var(--green)',fn:()=>nav('approvals')},
